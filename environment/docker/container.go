@@ -223,7 +223,7 @@ func (e *Environment) Create() error {
 		SecurityOpt:    []string{"no-new-privileges"},
 		ReadonlyRootfs: true,
 		CapDrop: []string{
-			"setpcap", "mknod", "audit_write", "net_raw", "dac_override",
+			"setpcap", "mknod", "audit_write", "net_raw", "net_admin", "dac_override",
 			"fowner", "fsetid", "net_bind_service", "sys_chroot", "setfcap",
 		},
 		NetworkMode: container.NetworkMode(config.Get().Docker.Network.Mode),

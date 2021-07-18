@@ -32,7 +32,7 @@ type Handler struct {
 	ro          bool
 }
 
-// Returns a new connection handler for the SFTP server. This allows a given user
+// NewHandler Returns a new connection handler for the SFTP server. This allows a given user
 // to access the underlying filesystem.
 func NewHandler(sc *ssh.ServerConn, fs *filesystem.Filesystem) *Handler {
 	return &Handler{
@@ -47,7 +47,7 @@ func NewHandler(sc *ssh.ServerConn, fs *filesystem.Filesystem) *Handler {
 	}
 }
 
-// Returns the sftp.Handlers for this struct.
+// Handlers Returns the sftp.Handlers for this struct.
 func (h *Handler) Handlers() sftp.Handlers {
 	return sftp.Handlers{
 		FileGet:  h,
