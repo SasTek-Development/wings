@@ -36,9 +36,8 @@ type DockerNetworkConfiguration struct {
 	IsInternal bool                    `default:"false" yaml:"is_internal"`
 	EnableICC  bool                    `default:"true" yaml:"enable_icc"`
 	Interfaces dockerNetworkInterfaces `yaml:"interfaces"`
-	CapDrop    []string                `default:"[\"setpcap\", \"mknod\", \"audit_write\", \"dac_override\",
-			\"fowner\", \"fsetid\", \"net_bind_service\", \"sys_chroot\", \"setfcap\", \"net_raw\"]" json:"cap_drop" yaml:"cap_drop"`
-	CapAdd []string `default:"[]" yaml:"cap_add" json:"cap_add"`
+	CapDrop    []string                `default:"[\"setpcap\", \"mknod\", \"audit_write\", \"dac_override\",\"fowner\", \"fsetid\", \"net_bind_service\", \"sys_chroot\", \"setfcap\", \"net_raw\"]" json:"cap_drop" yaml:"cap_drop"`
+	CapAdd     []string                `default:"[]" yaml:"cap_add" json:"cap_add"`
 }
 
 // DockerConfiguration defines the docker configuration used by the daemon when
