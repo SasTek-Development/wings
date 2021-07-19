@@ -5,7 +5,7 @@ ENV JAVA_VENDOR="%%VENDOR%%"
 
 RUN apt-get update && DEBIAN_FRONTEND="noninteractive" TZ="America/New_York" apt-get install -y tzdata
 
-apt-get install -y curl ca-certificates openssl git tar sqlite fontconfig iproute2 \
+RUN apt-get install -y curl ca-certificates openssl git tar sqlite fontconfig iproute2 \
  && useradd -d /home/container -m container
 
 # Start of SDKMAN installation
@@ -14,9 +14,10 @@ RUN rm /bin/sh && ln -s /bin/bash /bin/sh
 RUN apt-get -qq -y install curl
 RUN curl -s https://get.sdkman.io | bash
 RUN chmod a+x "$HOME/.sdkman/bin/sdkman-init.sh"
-
+RUN echo "sdkman_auto_complete=false" >> "$HOME/.sdkman/etc/config"
 RUN source "$HOME/.sdkman/bin/sdkman-init.sh"
 
+# Install iptables
 RUN apt-get install -y iptables
 
 USER container
@@ -24,4 +25,4 @@ ENV  USER=container HOME=/home/container
 
 WORKDIR     /home/container
 COPY        ./entrypoint.sh /entrypoint.sh
-CMD         ["/bin/bash", "/entrypoint.sh"]
+CMD         ["/bin/bash", ".../entrypoint.sh"]
