@@ -3,8 +3,9 @@ FROM ubuntu:18.04
 
 ENV JAVA_VENDOR="%%VENDOR%%"
 
-RUN apt-get update -y \
- && apt-get install -y curl ca-certificates openssl git tar sqlite fontconfig tzdata iproute2 \
+RUN apt-get update && DEBIAN_FRONTEND="noninteractive" TZ="America/New_York" apt-get install -y tzdata
+
+apt-get install -y curl ca-certificates openssl git tar sqlite fontconfig iproute2 \
  && useradd -d /home/container -m container
 
 # Start of SDKMAN installation
