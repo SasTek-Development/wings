@@ -1,16 +1,19 @@
 package cmd
 
 import (
+	"context"
 	"crypto/tls"
 	"errors"
 	"fmt"
 	log2 "log"
 	"net/http"
 	"os"
+	"os/signal"
 	"path"
 	"path/filepath"
 	"strconv"
 	"strings"
+	"syscall"
 	"time"
 
 	"github.com/NYTimes/logrotate"
@@ -345,6 +348,21 @@ func rootCmdRun(cmd *cobra.Command, _ []string) {
 	if err := s.ListenAndServe(); err != nil {
 		log.WithField("error", err).Fatal("failed to configure HTTP server")
 	}
+
+	// This function listens for SIGTERM signals and shutdowns it's services.
+	go func() {
+		log.Info("Listening to SIGTERM signal...")
+		c := make(chan os.Signal, 1)
+		signal.Notify(c, os.Interrupt, syscall.SIGTERM)
+
+		log.Info("Shutting down gracefully...")
+		err := s.Shutdown(context.Background())
+		if err != nil {
+			log.Fatal("Failed to gracefully shutdown HTTP/s server")
+			return
+		}
+
+	}()
 }
 
 // Reads the configuration from the disk and then sets up the global singleton
