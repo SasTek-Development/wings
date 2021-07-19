@@ -336,19 +336,6 @@ func rootCmdRun(cmd *cobra.Command, _ []string) {
 		return
 	}
 
-	// Check if main http server should run with TLS. Otherwise reset the TLS
-	// config on the server and then serve it over normal HTTP.
-	if api.Ssl.Enabled {
-		if err := s.ListenAndServeTLS(strings.ToLower(api.Ssl.CertificateFile), strings.ToLower(api.Ssl.KeyFile)); err != nil {
-			log.WithFields(log.Fields{"auto_tls": false, "error": err}).Fatal("failed to configure HTTPS server")
-		}
-		return
-	}
-	s.TLSConfig = nil
-	if err := s.ListenAndServe(); err != nil {
-		log.WithField("error", err).Fatal("failed to configure HTTP server")
-	}
-
 	// This function listens for SIGTERM signals and shutdowns it's services.
 	go func() {
 		log.Info("Listening to SIGTERM signal...")
@@ -361,8 +348,20 @@ func rootCmdRun(cmd *cobra.Command, _ []string) {
 			log.Fatal("Failed to gracefully shutdown HTTP/s server")
 			return
 		}
-
 	}()
+
+	// Check if main http server should run with TLS. Otherwise reset the TLS
+	// config on the server and then serve it over normal HTTP.
+	if api.Ssl.Enabled {
+		if err := s.ListenAndServeTLS(strings.ToLower(api.Ssl.CertificateFile), strings.ToLower(api.Ssl.KeyFile)); err != nil {
+			log.WithFields(log.Fields{"auto_tls": false, "error": err}).Fatal("failed to configure HTTPS server")
+		}
+		return
+	}
+	s.TLSConfig = nil
+	if err := s.ListenAndServe(); err != nil {
+		log.WithField("error", err).Fatal("failed to configure HTTP server")
+	}
 }
 
 // Reads the configuration from the disk and then sets up the global singleton
