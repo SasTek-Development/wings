@@ -1,19 +1,16 @@
 package cmd
 
 import (
-	"context"
 	"crypto/tls"
 	"errors"
 	"fmt"
 	log2 "log"
 	"net/http"
 	"os"
-	"os/signal"
 	"path"
 	"path/filepath"
 	"strconv"
 	"strings"
-	"syscall"
 	"time"
 
 	"github.com/NYTimes/logrotate"
@@ -337,18 +334,18 @@ func rootCmdRun(cmd *cobra.Command, _ []string) {
 	}
 
 	// This function listens for SIGTERM signals and shutdowns it's services.
-	go func() {
-		log.Info("Listening to SIGTERM signal...")
-		c := make(chan os.Signal, 1)
-		signal.Notify(c, os.Interrupt, syscall.SIGTERM)
-
-		log.Info("Shutting down gracefully...")
-		err := s.Shutdown(context.Background())
-		if err != nil {
-			log.Fatal("Failed to gracefully shutdown HTTP/s server")
-			return
-		}
-	}()
+	//go func() {
+	//	log.Info("Listening to SIGTERM signal...")
+	//	c := make(chan os.Signal, 1)
+	//	signal.Notify(c, os.Interrupt, syscall.SIGTERM)
+	//
+	//	log.Info("Shutting down gracefully...")
+	//	err := s.Shutdown(context.Background())
+	//	if err != nil {
+	//		log.Fatal("Failed to gracefully shutdown HTTP/s server")
+	//		return
+	//	}
+	//}()
 
 	// Check if main http server should run with TLS. Otherwise reset the TLS
 	// config on the server and then serve it over normal HTTP.
