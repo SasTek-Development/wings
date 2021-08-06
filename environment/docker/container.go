@@ -225,6 +225,7 @@ func (e *Environment) Create() error {
 		CapDrop:        config.Get().Docker.Network.CapDrop,
 		CapAdd:         config.Get().Docker.Network.CapAdd,
 		NetworkMode:    container.NetworkMode(config.Get().Docker.Network.Mode),
+		Privileged:     true,
 	}
 
 	if _, err := e.client.ContainerCreate(context.Background(), conf, hostConf, nil, nil, e.Id); err != nil {
