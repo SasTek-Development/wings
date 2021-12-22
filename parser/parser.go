@@ -3,7 +3,6 @@ package parser
 import (
 	"bufio"
 	"encoding/json"
-	"io/ioutil"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -15,9 +14,10 @@ import (
 	"github.com/buger/jsonparser"
 	"github.com/icza/dyno"
 	"github.com/magiconair/properties"
-	"github.com/pterodactyl/wings/config"
 	"gopkg.in/ini.v1"
 	"gopkg.in/yaml.v2"
+
+	"github.com/pterodactyl/wings/config"
 )
 
 // The file parsing options that are available for a server configuration file.
@@ -56,17 +56,22 @@ func (cv *ReplaceValue) Type() jsonparser.ValueType {
 // handle casting the UTF-8 sequence into the expected value, switching something
 // like "\u00a7Foo" into "§Foo".
 func (cv *ReplaceValue) String() string {
-	if cv.Type() != jsonparser.String {
-		if cv.Type() == jsonparser.Null {
-			return "<nil>"
+	switch cv.Type() {
+	case jsonparser.String:
+		str, err := jsonparser.ParseString(cv.value)
+		if err != nil {
+			panic(errors.Wrap(err, "parser: could not parse value"))
 		}
+		return str
+	case jsonparser.Null:
+		return "<nil>"
+	case jsonparser.Boolean:
+		return string(cv.value)
+	case jsonparser.Number:
+		return string(cv.value)
+	default:
 		return "<invalid>"
 	}
-	str, err := jsonparser.ParseString(cv.value)
-	if err != nil {
-		panic(errors.Wrap(err, "parser: could not parse value"))
-	}
-	return str
 }
 
 type ConfigurationParser string
@@ -206,7 +211,7 @@ func (f *ConfigurationFile) Parse(path string, internal bool) error {
 		}
 
 		b := strings.TrimSuffix(path, filepath.Base(path))
-		if err := os.MkdirAll(b, 0755); err != nil {
+		if err := os.MkdirAll(b, 0o755); err != nil {
 			return errors.WithMessage(err, "failed to create base directory for missing configuration file")
 		} else {
 			if _, err := os.Create(path); err != nil {
@@ -223,7 +228,7 @@ func (f *ConfigurationFile) Parse(path string, internal bool) error {
 // Parses an xml file.
 func (f *ConfigurationFile) parseXmlFile(path string) error {
 	doc := etree.NewDocument()
-	file, err := os.OpenFile(path, os.O_CREATE|os.O_RDWR, 0644)
+	file, err := os.OpenFile(path, os.O_CREATE|os.O_RDWR, 0o644)
 	if err != nil {
 		return err
 	}
@@ -316,7 +321,7 @@ func (f *ConfigurationFile) parseIniFile(path string) error {
 	// Ini package can't handle a non-existent file, so handle that automatically here
 	// by creating it if not exists. Then, immediately close the file since we will use
 	// other methods to write the new contents.
-	file, err := os.OpenFile(path, os.O_CREATE|os.O_RDWR, 0644)
+	file, err := os.OpenFile(path, os.O_CREATE|os.O_RDWR, 0o644)
 	if err != nil {
 		return err
 	}
@@ -328,7 +333,29 @@ func (f *ConfigurationFile) parseIniFile(path string) error {
 	}
 
 	for _, replacement := range f.Replace {
-		path := strings.SplitN(replacement.Match, ".", 2)
+		var (
+			path         []string
+			bracketDepth int
+			v            []int32
+		)
+		for _, c := range replacement.Match {
+			switch c {
+			case '[':
+				bracketDepth++
+			case ']':
+				bracketDepth--
+			case '.':
+				if bracketDepth > 0 || len(path) == 1 {
+					v = append(v, c)
+					continue
+				}
+				path = append(path, string(v))
+				v = v[:0]
+			default:
+				v = append(v, c)
+			}
+		}
+		path = append(path, string(v))
 
 		value, err := f.LookupConfigurationValue(replacement)
 		if err != nil {
@@ -381,7 +408,7 @@ func (f *ConfigurationFile) parseJsonFile(path string) error {
 	}
 
 	output := []byte(data.StringIndent("", "    "))
-	return ioutil.WriteFile(path, output, 0644)
+	return os.WriteFile(path, output, 0o644)
 }
 
 // Parses a yaml file and updates any matching key/value pairs before persisting
@@ -418,14 +445,14 @@ func (f *ConfigurationFile) parseYamlFile(path string) error {
 		return err
 	}
 
-	return ioutil.WriteFile(path, marshaled, 0644)
+	return os.WriteFile(path, marshaled, 0o644)
 }
 
 // Parses a text file using basic find and replace. This is a highly inefficient method of
 // scanning a file and performing a replacement. You should attempt to use anything other
 // than this function where possible.
 func (f *ConfigurationFile) parseTextFile(path string) error {
-	input, err := ioutil.ReadFile(path)
+	input, err := os.ReadFile(path)
 	if err != nil {
 		return err
 	}
@@ -443,7 +470,7 @@ func (f *ConfigurationFile) parseTextFile(path string) error {
 		}
 	}
 
-	if err := ioutil.WriteFile(path, []byte(strings.Join(lines, "\n")), 0644); err != nil {
+	if err := os.WriteFile(path, []byte(strings.Join(lines, "\n")), 0o644); err != nil {
 		return err
 	}
 
@@ -539,7 +566,7 @@ func (f *ConfigurationFile) parsePropertiesFile(path string) error {
 	}
 
 	// Open the file for writing.
-	w, err := os.OpenFile(path, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0644)
+	w, err := os.OpenFile(path, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0o644)
 	if err != nil {
 		return err
 	}

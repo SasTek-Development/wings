@@ -14,7 +14,7 @@ import (
 	"github.com/juju/ratelimit"
 	"github.com/karrick/godirwalk"
 	"github.com/klauspost/pgzip"
-	"github.com/sabhiram/go-gitignore"
+	ignore "github.com/sabhiram/go-gitignore"
 
 	"github.com/pterodactyl/wings/config"
 )
@@ -45,7 +45,7 @@ type Archive struct {
 // Create creates an archive at dst with all of the files defined in the
 // included files struct.
 func (a *Archive) Create(dst string) error {
-	f, err := os.OpenFile(dst, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0600)
+	f, err := os.OpenFile(dst, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0o600)
 	if err != nil {
 		return err
 	}

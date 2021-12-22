@@ -1,22 +1,25 @@
 package cli
 
 import (
-	"emperror.dev/errors"
 	"fmt"
-	"github.com/apex/log"
-	"github.com/apex/log/handlers/cli"
-	color2 "github.com/fatih/color"
-	"github.com/mattn/go-colorable"
 	"io"
 	"os"
 	"strings"
 	"sync"
 	"time"
+
+	"emperror.dev/errors"
+	"github.com/apex/log"
+	"github.com/apex/log/handlers/cli"
+	color2 "github.com/fatih/color"
+	"github.com/mattn/go-colorable"
 )
 
-var Default = New(os.Stderr, true)
-var bold = color2.New(color2.Bold)
-var boldred = color2.New(color2.Bold, color2.FgRed)
+var (
+	Default = New(os.Stderr, true)
+	bold    = color2.New(color2.Bold)
+	boldred = color2.New(color2.Bold, color2.FgRed)
+)
 
 var Strings = [...]string{
 	log.DebugLevel: "DEBUG",

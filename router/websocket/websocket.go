@@ -2,22 +2,24 @@ package websocket
 
 import (
 	"context"
-	"emperror.dev/errors"
 	"encoding/json"
 	"fmt"
+	"net/http"
+	"strings"
+	"sync"
+	"time"
+
+	"emperror.dev/errors"
 	"github.com/apex/log"
 	"github.com/gbrlsnchs/jwt/v3"
 	"github.com/google/uuid"
 	"github.com/gorilla/websocket"
+
 	"github.com/pterodactyl/wings/config"
 	"github.com/pterodactyl/wings/environment"
 	"github.com/pterodactyl/wings/environment/docker"
 	"github.com/pterodactyl/wings/router/tokens"
 	"github.com/pterodactyl/wings/server"
-	"net/http"
-	"strings"
-	"sync"
-	"time"
 )
 
 const (
@@ -55,11 +57,10 @@ func IsJwtError(err error) bool {
 		errors.Is(err, jwt.ErrExpValidation)
 }
 
-// Parses a JWT into a websocket token payload.
+// NewTokenPayload parses a JWT into a websocket token payload.
 func NewTokenPayload(token []byte) (*tokens.WebsocketPayload, error) {
-	payload := tokens.WebsocketPayload{}
-	err := tokens.ParseToken(token, &payload)
-	if err != nil {
+	var payload tokens.WebsocketPayload
+	if err := tokens.ParseToken(token, &payload); err != nil {
 		return nil, err
 	}
 
@@ -74,7 +75,7 @@ func NewTokenPayload(token []byte) (*tokens.WebsocketPayload, error) {
 	return &payload, nil
 }
 
-// Returns a new websocket handler using the context provided.
+// GetHandler returns a new websocket handler using the context provided.
 func GetHandler(s *server.Server, w http.ResponseWriter, r *http.Request) (*Handler, error) {
 	upgrader := websocket.Upgrader{
 		// Ensure that the websocket request is originating from the Panel itself,
@@ -113,6 +114,12 @@ func GetHandler(s *server.Server, w http.ResponseWriter, r *http.Request) (*Hand
 
 func (h *Handler) Uuid() uuid.UUID {
 	return h.uuid
+}
+
+func (h *Handler) Logger() *log.Entry {
+	return log.WithField("subsystem", "websocket").
+		WithField("connection", h.Uuid().String()).
+		WithField("server", h.server.ID())
 }
 
 func (h *Handler) SendJson(v *Message) error {
@@ -180,7 +187,7 @@ func (h *Handler) unsafeSendJson(v interface{}) error {
 	return h.Connection.WriteJSON(v)
 }
 
-// Checks if the JWT is still valid.
+// TokenValid checks if the JWT is still valid.
 func (h *Handler) TokenValid() error {
 	j := h.GetJwt()
 	if j == nil {
@@ -199,14 +206,14 @@ func (h *Handler) TokenValid() error {
 		return ErrJwtNoConnectPerm
 	}
 
-	if h.server.Id() != j.GetServerUuid() {
+	if h.server.ID() != j.GetServerUuid() {
 		return ErrJwtUuidMismatch
 	}
 
 	return nil
 }
 
-// Sends an error back to the connected websocket instance by checking the permissions
+// SendErrorJson sends an error back to the connected websocket instance by checking the permissions
 // of the token. If the user has the "receive-errors" grant we will send back the actual
 // error message, otherwise we just send back a standard error message.
 func (h *Handler) SendErrorJson(msg Message, err error, shouldLog ...bool) error {
@@ -236,7 +243,7 @@ func (h *Handler) SendErrorJson(msg Message, err error, shouldLog ...bool) error
 	return h.unsafeSendJson(wsm)
 }
 
-// Converts an error message into a more readable representation and returns a UUID
+// GetErrorMessage converts an error message into a more readable representation and returns a UUID
 // that can be cross-referenced to find the specific error that triggered.
 func (h *Handler) GetErrorMessage(msg string) (string, uuid.UUID) {
 	u := uuid.Must(uuid.NewRandom())
@@ -246,13 +253,7 @@ func (h *Handler) GetErrorMessage(msg string) (string, uuid.UUID) {
 	return m, u
 }
 
-// Sets the JWT for the websocket in a race-safe manner.
-func (h *Handler) setJwt(token *tokens.WebsocketPayload) {
-	h.Lock()
-	h.jwt = token
-	h.Unlock()
-}
-
+// GetJwt returns the JWT for the websocket in a race-safe manner.
 func (h *Handler) GetJwt() *tokens.WebsocketPayload {
 	h.RLock()
 	defer h.RUnlock()
@@ -260,8 +261,15 @@ func (h *Handler) GetJwt() *tokens.WebsocketPayload {
 	return h.jwt
 }
 
-// Handle the inbound socket request and route it to the proper server action.
-func (h *Handler) HandleInbound(m Message) error {
+// setJwt sets the JWT for the websocket in a race-safe manner.
+func (h *Handler) setJwt(token *tokens.WebsocketPayload) {
+	h.Lock()
+	h.jwt = token
+	h.Unlock()
+}
+
+// HandleInbound handles an inbound socket request and route it to the proper action.
+func (h *Handler) HandleInbound(ctx context.Context, m Message) error {
 	if m.Event != AuthenticationEvent {
 		if err := h.TokenValid(); err != nil {
 			h.unsafeSendJson(Message{
@@ -277,13 +285,6 @@ func (h *Handler) HandleInbound(m Message) error {
 		{
 			token, err := NewTokenPayload([]byte(strings.Join(m.Args, "")))
 			if err != nil {
-				// If the error says the JWT expired, send a token expired
-				// event and hopefully the client renews the token.
-				if err == jwt.ErrExpValidation {
-					h.SendJson(&Message{Event: TokenExpiredEvent})
-					return nil
-				}
-
 				return err
 			}
 
@@ -296,10 +297,7 @@ func (h *Handler) HandleInbound(m Message) error {
 			h.setJwt(token)
 
 			// Tell the client they authenticated successfully.
-			h.unsafeSendJson(Message{
-				Event: AuthenticationSuccessEvent,
-				Args:  []string{},
-			})
+			h.unsafeSendJson(Message{Event: AuthenticationSuccessEvent})
 
 			// Check if the client was refreshing their authentication token
 			// instead of authenticating for the first time.
@@ -308,6 +306,11 @@ func (h *Handler) HandleInbound(m Message) error {
 				// https://github.com/pterodactyl/panel/issues/2077
 				return nil
 			}
+
+			// Now that we've authenticated with the token and confirmed that we're not
+			// reconnecting to the socket, register the event listeners for the server and
+			// the token expiration.
+			h.registerListenerEvents(ctx)
 
 			// On every authentication event, send the current server status back
 			// to the client. :)
@@ -366,7 +369,9 @@ func (h *Handler) HandleInbound(m Message) error {
 		}
 	case SendServerLogsEvent:
 		{
-			if running, _ := h.server.Environment.IsRunning(); !running {
+			ctx, cancel := context.WithTimeout(context.Background(), time.Second*5)
+			defer cancel()
+			if running, _ := h.server.Environment.IsRunning(ctx); !running {
 				return nil
 			}
 

@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"io/ioutil"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -15,6 +14,7 @@ import (
 	"emperror.dev/errors"
 	"github.com/apex/log"
 	"github.com/gammazero/workerpool"
+
 	"github.com/pterodactyl/wings/config"
 	"github.com/pterodactyl/wings/environment"
 	"github.com/pterodactyl/wings/environment/docker"
@@ -28,9 +28,9 @@ type Manager struct {
 	servers []*Server
 }
 
-// NewManager returns a new server manager instance. This will boot up all of
-// the servers that are currently present on the filesystem and set them into
-// the manager.
+// NewManager returns a new server manager instance. This will boot up all the
+// servers that are currently present on the filesystem and set them into the
+// manager.
 func NewManager(ctx context.Context, client remote.Client) (*Manager, error) {
 	m := NewEmptyManager(client)
 	if err := m.init(ctx); err != nil {
@@ -52,7 +52,7 @@ func (m *Manager) Client() remote.Client {
 	return m.client
 }
 
-// Put replaces all of the current values in the collection with the value that
+// Put replaces all the current values in the collection with the value that
 // is passed through.
 func (m *Manager) Put(s []*Server) {
 	m.mu.Lock()
@@ -60,7 +60,7 @@ func (m *Manager) Put(s []*Server) {
 	m.mu.Unlock()
 }
 
-// All returns all of the items in the collection.
+// All returns all the items in the collection.
 func (m *Manager) All() []*Server {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
@@ -78,7 +78,7 @@ func (m *Manager) Add(s *Server) {
 // found in the global collection or not.
 func (m *Manager) Get(uuid string) (*Server, bool) {
 	match := m.Find(func(server *Server) bool {
-		return server.Id() == uuid
+		return server.ID() == uuid
 	})
 	return match, match != nil
 }
@@ -130,13 +130,13 @@ func (m *Manager) Remove(filter func(match *Server) bool) {
 func (m *Manager) PersistStates() error {
 	states := map[string]string{}
 	for _, s := range m.All() {
-		states[s.Id()] = s.Environment.State()
+		states[s.ID()] = s.Environment.State()
 	}
 	data, err := json.Marshal(states)
 	if err != nil {
 		return errors.WithStack(err)
 	}
-	if err := ioutil.WriteFile(config.Get().System.GetStatesPath(), data, 0644); err != nil {
+	if err := os.WriteFile(config.Get().System.GetStatesPath(), data, 0o644); err != nil {
 		return errors.WithStack(err)
 	}
 	return nil
@@ -144,7 +144,7 @@ func (m *Manager) PersistStates() error {
 
 // ReadStates returns the state of the servers.
 func (m *Manager) ReadStates() (map[string]string, error) {
-	f, err := os.OpenFile(config.Get().System.GetStatesPath(), os.O_RDONLY|os.O_CREATE, 0644)
+	f, err := os.OpenFile(config.Get().System.GetStatesPath(), os.O_RDONLY|os.O_CREATE, 0o644)
 	if err != nil {
 		return nil, errors.WithStack(err)
 	}
@@ -171,15 +171,18 @@ func (m *Manager) InitServer(data remote.ServerConfigurationResponse) (*Server, 
 	if err != nil {
 		return nil, err
 	}
-	if err := s.UpdateDataStructure(data.Settings); err != nil {
-		return nil, err
+
+	// Setup the base server configuration data which will be used for all of the
+	// remaining functionality in this call.
+	if err := s.SyncWithConfiguration(data); err != nil {
+		return nil, errors.WithStackIf(err)
 	}
 
-	s.fs = filesystem.New(filepath.Join(config.Get().System.Data, s.Id()), s.DiskSpace(), s.Config().Egg.FileDenylist)
+	s.fs = filesystem.New(filepath.Join(config.Get().System.Data, s.ID()), s.DiskSpace(), s.Config().Egg.FileDenylist)
 
 	// Right now we only support a Docker based environment, so I'm going to hard code
 	// this logic in. When we're ready to support other environment we'll need to make
-	// some modifications here obviously.
+	// some modifications here, obviously.
 	settings := environment.Settings{
 		Mounts:      s.Mounts(),
 		Allocations: s.cfg.Allocations,
@@ -191,17 +194,12 @@ func (m *Manager) InitServer(data remote.ServerConfigurationResponse) (*Server, 
 		Image: s.Config().Container.Image,
 	}
 
-	if env, err := docker.New(s.Id(), &meta, envCfg); err != nil {
+	if env, err := docker.New(s.ID(), &meta, envCfg); err != nil {
 		return nil, err
 	} else {
 		s.Environment = env
 		s.StartEventListeners()
 		s.Throttler().StartTimer(s.Context())
-	}
-
-	// Forces the configuration to be synced with the panel.
-	if err := s.SyncWithConfiguration(data); err != nil {
-		return nil, err
 	}
 
 	// If the server's data directory exists, force disk usage calculation.
@@ -212,7 +210,7 @@ func (m *Manager) InitServer(data remote.ServerConfigurationResponse) (*Server, 
 	return s, nil
 }
 
-// initializeFromRemoteSource iterates over a given directory and loads all of
+// initializeFromRemoteSource iterates over a given directory and loads all
 // the servers listed before returning them to the calling function.
 func (m *Manager) init(ctx context.Context) error {
 	log.Info("fetching list of servers from API")
@@ -252,7 +250,7 @@ func (m *Manager) init(ctx context.Context) error {
 		})
 	}
 
-	// Wait until we've processed all of the configuration files in the directory
+	// Wait until we've processed all the configuration files in the directory
 	// before continuing.
 	pool.StopWait()
 

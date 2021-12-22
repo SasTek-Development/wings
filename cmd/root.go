@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"context"
 	"crypto/tls"
 	"errors"
 	"fmt"
@@ -20,6 +21,10 @@ import (
 	"github.com/gammazero/workerpool"
 	"github.com/mitchellh/colorstring"
 	"github.com/pkg/profile"
+	"github.com/spf13/cobra"
+	"golang.org/x/crypto/acme"
+	"golang.org/x/crypto/acme/autocert"
+
 	"github.com/pterodactyl/wings/config"
 	"github.com/pterodactyl/wings/environment"
 	"github.com/pterodactyl/wings/loggers/cli"
@@ -28,9 +33,6 @@ import (
 	"github.com/pterodactyl/wings/server"
 	"github.com/pterodactyl/wings/sftp"
 	"github.com/pterodactyl/wings/system"
-	"github.com/spf13/cobra"
-	"golang.org/x/crypto/acme"
-	"golang.org/x/crypto/acme/autocert"
 )
 
 var (
@@ -40,7 +42,7 @@ var (
 
 var rootCommand = &cobra.Command{
 	Use:   "wings",
-	Short: "Runs the API server allowing programatic control of game servers for Pterodactyl Panel.",
+	Short: "Runs the API server allowing programmatic control of game servers for Pterodactyl Panel.",
 	PreRun: func(cmd *cobra.Command, args []string) {
 		initConfig()
 		initLogging()
@@ -90,9 +92,9 @@ func rootCmdRun(cmd *cobra.Command, _ []string) {
 	case "mem":
 		defer profile.Start(profile.MemProfile).Stop()
 	case "alloc":
-		defer profile.Start(profile.MemProfile, profile.MemProfileAllocs()).Stop()
+		defer profile.Start(profile.MemProfile, profile.MemProfileAllocs).Stop()
 	case "heap":
-		defer profile.Start(profile.MemProfile, profile.MemProfileHeap()).Stop()
+		defer profile.Start(profile.MemProfile, profile.MemProfileHeap).Stop()
 	case "routines":
 		defer profile.Start(profile.GoroutineProfile).Stop()
 	case "mutex":
@@ -159,7 +161,7 @@ func rootCmdRun(cmd *cobra.Command, _ []string) {
 
 	// Just for some nice log output.
 	for _, s := range manager.All() {
-		log.WithField("server", s.Id()).Info("finished loading configuration for server")
+		log.WithField("server", s.ID()).Info("finished loading configuration for server")
 	}
 
 	states, err := manager.ReadStates()
@@ -201,14 +203,24 @@ func rootCmdRun(cmd *cobra.Command, _ []string) {
 		pool.Submit(func() {
 			s.Log().Info("configuring server environment and restoring to previous state")
 			var st string
-			if state, exists := states[s.Id()]; exists {
+			if state, exists := states[s.ID()]; exists {
 				st = state
 			}
 
-			r, err := s.Environment.IsRunning()
+			// Use a timed context here to avoid booting issues where Docker hangs for a
+			// specific container that would cause Wings to be un-bootable until the entire
+			// machine is rebooted. It is much better for us to just have a single failed
+			// server instance than an entire offline node.
+			//
+			// @see https://github.com/pterodactyl/panel/issues/2475
+			// @see https://github.com/pterodactyl/panel/issues/3358
+			ctx, cancel := context.WithTimeout(cmd.Context(), time.Second*30)
+			defer cancel()
+
+			r, err := s.Environment.IsRunning(ctx)
 			// We ignore missing containers because we don't want to actually block booting of wings at this
-			// point. If we didn't do this and you pruned all of the images and then started wings you could
-			// end up waiting a long period of time for all of the images to be re-pulled on Wings boot rather
+			// point. If we didn't do this, and you pruned all the images and then started wings you could
+			// end up waiting a long period of time for all the images to be re-pulled on Wings boot rather
 			// than when the server itself is started.
 			if err != nil && !client.IsErrNotFound(err) {
 				s.Log().WithField("error", err).Error("error checking server environment status")
@@ -234,7 +246,7 @@ func rootCmdRun(cmd *cobra.Command, _ []string) {
 				s.Log().Info("detected server is running, re-attaching to process...")
 
 				s.Environment.SetState(environment.ProcessRunningState)
-				if err := s.Environment.Attach(); err != nil {
+				if err := s.Environment.Attach(ctx); err != nil {
 					s.Log().WithField("error", err).Warn("failed to attach to running server environment")
 				}
 			} else {
@@ -243,13 +255,20 @@ func rootCmdRun(cmd *cobra.Command, _ []string) {
 				// state being tracked.
 				s.Environment.SetState(environment.ProcessOfflineState)
 			}
+
+			if state := s.Environment.State(); state == environment.ProcessStartingState || state == environment.ProcessRunningState {
+				s.Log().Debug("re-syncing server configuration for already running server")
+				if err := s.Sync(); err != nil {
+					s.Log().WithError(err).Error("failed to re-sync server configuration")
+				}
+			}
 		})
 	}
 
-	// Wait until all of the servers are ready to go before we fire up the SFTP and HTTP servers.
+	// Wait until all the servers are ready to go before we fire up the SFTP and HTTP servers.
 	pool.StopWait()
 	defer func() {
-		// Cancel the context on all of the running servers at this point, even though the
+		// Cancel the context on all the running servers at this point, even though the
 		// program is just shutting down.
 		for _, s := range manager.All() {
 			s.CtxCancel()
@@ -266,7 +285,7 @@ func rootCmdRun(cmd *cobra.Command, _ []string) {
 
 	go func() {
 		log.Info("updating server states on Panel: marking installing/restoring servers as normal")
-		// Update all of the servers on the Panel to be in a valid state if they're
+		// Update all the servers on the Panel to be in a valid state if they're
 		// currently marked as installing/restoring now that Wings is restarted.
 		if err := pclient.ResetServersState(cmd.Context()); err != nil {
 			log.WithField("error", err).Error("failed to reset server states on Panel: some instances may be stuck in an installing/restoring state unexpectedly")
@@ -275,12 +294,12 @@ func rootCmdRun(cmd *cobra.Command, _ []string) {
 
 	sys := config.Get().System
 	// Ensure the archive directory exists.
-	if err := os.MkdirAll(sys.ArchiveDirectory, 0755); err != nil {
+	if err := os.MkdirAll(sys.ArchiveDirectory, 0o755); err != nil {
 		log.WithField("error", err).Error("failed to create archive directory")
 	}
 
 	// Ensure the backup directory exists.
-	if err := os.MkdirAll(sys.BackupDirectory, 0755); err != nil {
+	if err := os.MkdirAll(sys.BackupDirectory, 0o755); err != nil {
 		log.WithField("error", err).Error("failed to create backup directory")
 	}
 
@@ -362,7 +381,7 @@ func rootCmdRun(cmd *cobra.Command, _ []string) {
 }
 
 // Reads the configuration from the disk and then sets up the global singleton
-// with all of the configuration values.
+// with all the configuration values.
 func initConfig() {
 	if !strings.HasPrefix(configPath, "/") {
 		d, err := os.Getwd()
@@ -387,7 +406,7 @@ func initConfig() {
 // in the code without having to pass around a logger instance.
 func initLogging() {
 	dir := config.Get().System.LogDirectory
-	if err := os.MkdirAll(path.Join(dir, "/install"), 0700); err != nil {
+	if err := os.MkdirAll(path.Join(dir, "/install"), 0o700); err != nil {
 		log2.Fatalf("cmd/root: failed to create install directory path: %s", err)
 	}
 	p := filepath.Join(dir, "/wings.log")

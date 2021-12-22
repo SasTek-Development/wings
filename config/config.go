@@ -4,7 +4,6 @@ import (
 	"context"
 	"crypto/tls"
 	"fmt"
-	"io/ioutil"
 	"os"
 	"os/exec"
 	"os/user"
@@ -21,8 +20,9 @@ import (
 	"github.com/cobaugh/osrelease"
 	"github.com/creasty/defaults"
 	"github.com/gbrlsnchs/jwt/v3"
-	"github.com/pterodactyl/wings/system"
 	"gopkg.in/yaml.v2"
+
+	"github.com/pterodactyl/wings/system"
 )
 
 const DefaultLocation = "/etc/pterodactyl/config.yml"
@@ -47,13 +47,15 @@ var DefaultTLSConfig = &tls.Config{
 	CurvePreferences:         []tls.CurveID{tls.X25519, tls.CurveP256},
 }
 
-var mu sync.RWMutex
-var _config *Configuration
-var _jwtAlgo *jwt.HMACSHA
-var _debugViaFlag bool
+var (
+	mu            sync.RWMutex
+	_config       *Configuration
+	_jwtAlgo      *jwt.HMACSHA
+	_debugViaFlag bool
+)
 
 // Locker specific to writing the configuration to the disk, this happens
-// in areas that might already be locked so we don't want to crash the process.
+// in areas that might already be locked, so we don't want to crash the process.
 var _writeLock sync.Mutex
 
 // SftpConfiguration defines the configuration of the internal SFTP server.
@@ -180,6 +182,9 @@ type SystemConfiguration struct {
 }
 
 type CrashDetection struct {
+	// CrashDetectionEnabled sets if crash detection is enabled globally for all servers on this node.
+	CrashDetectionEnabled bool `default:"true" yaml:"enabled"`
+
 	// Determines if Wings should detect a server that stops with a normal exit code of
 	// "0" as being crashed if the process stopped without any Wings interaction. E.g.
 	// the user did not press the stop button, but the process stopped cleanly.
@@ -374,7 +379,7 @@ func WriteToDisk(c *Configuration) error {
 	if err != nil {
 		return err
 	}
-	if err := ioutil.WriteFile(c.path, b, 0600); err != nil {
+	if err := os.WriteFile(c.path, b, 0o600); err != nil {
 		return err
 	}
 	return nil
@@ -442,7 +447,7 @@ func EnsurePterodactylUser() error {
 // FromFile reads the configuration from the provided file and stores it in the
 // global singleton for this instance.
 func FromFile(path string) error {
-	b, err := ioutil.ReadFile(path)
+	b, err := os.ReadFile(path)
 	if err != nil {
 		return err
 	}
@@ -450,18 +455,17 @@ func FromFile(path string) error {
 	if err != nil {
 		return err
 	}
-	// Replace environment variables within the configuration file with their
-	// values from the host system.
-	b = []byte(os.ExpandEnv(string(b)))
+
 	if err := yaml.Unmarshal(b, c); err != nil {
 		return err
 	}
+
 	// Store this configuration in the global state.
 	Set(c)
 	return nil
 }
 
-// ConfigureDirectories ensures that all of the system directories exist on the
+// ConfigureDirectories ensures that all the system directories exist on the
 // system. These directories are created so that only the owner can read the data,
 // and no other users.
 //
@@ -469,7 +473,7 @@ func FromFile(path string) error {
 func ConfigureDirectories() error {
 	root := _config.System.RootDirectory
 	log.WithField("path", root).Debug("ensuring root data directory exists")
-	if err := os.MkdirAll(root, 0700); err != nil {
+	if err := os.MkdirAll(root, 0o700); err != nil {
 		return err
 	}
 
@@ -490,17 +494,17 @@ func ConfigureDirectories() error {
 	}
 
 	log.WithField("path", _config.System.Data).Debug("ensuring server data directory exists")
-	if err := os.MkdirAll(_config.System.Data, 0700); err != nil {
+	if err := os.MkdirAll(_config.System.Data, 0o700); err != nil {
 		return err
 	}
 
 	log.WithField("path", _config.System.ArchiveDirectory).Debug("ensuring archive data directory exists")
-	if err := os.MkdirAll(_config.System.ArchiveDirectory, 0700); err != nil {
+	if err := os.MkdirAll(_config.System.ArchiveDirectory, 0o700); err != nil {
 		return err
 	}
 
 	log.WithField("path", _config.System.BackupDirectory).Debug("ensuring backup data directory exists")
-	if err := os.MkdirAll(_config.System.BackupDirectory, 0700); err != nil {
+	if err := os.MkdirAll(_config.System.BackupDirectory, 0o700); err != nil {
 		return err
 	}
 
@@ -573,7 +577,7 @@ func ConfigureTimezone() error {
 		_config.System.Timezone = tz
 	}
 	if _config.System.Timezone == "" {
-		b, err := ioutil.ReadFile("/etc/timezone")
+		b, err := os.ReadFile("/etc/timezone")
 		if err != nil {
 			if !os.IsNotExist(err) {
 				return errors.WithMessage(err, "config: failed to open timezone file")

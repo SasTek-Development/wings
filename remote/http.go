@@ -6,7 +6,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"io/ioutil"
 	"net/http"
 	"strconv"
 	"strings"
@@ -15,6 +14,7 @@ import (
 	"emperror.dev/errors"
 	"github.com/apex/log"
 	"github.com/cenkalti/backoff/v4"
+
 	"github.com/pterodactyl/wings/system"
 )
 
@@ -118,7 +118,7 @@ func (c *client) requestOnce(ctx context.Context, method, path string, body io.R
 	return &Response{res}, err
 }
 
-// request executes a HTTP request against the Panel API. If there is an error
+// request executes an HTTP request against the Panel API. If there is an error
 // encountered with the request it will be retried using an exponential backoff.
 // If the error returned from the Panel is due to API throttling or because there
 // are invalid authentication credentials provided the request will _not_ be
@@ -170,7 +170,7 @@ func (c *client) request(ctx context.Context, method, path string, body io.Reade
 // This allows for issues with DNS resolution, or rare race conditions due to
 // slower SQL queries on the Panel to potentially self-resolve without just
 // immediately failing the first request. The example below shows the amount of
-// time that has ellapsed between each call to the handler when an error is
+// time that has elapsed between each call to the handler when an error is
 // returned. You can tweak these values as needed to get the effect you desire.
 //
 // If maxAttempts is a value greater than 0 the backoff will be capped at a total
@@ -223,9 +223,9 @@ func (r *Response) Read() ([]byte, error) {
 		return nil, errors.New("remote: attempting to read missing response")
 	}
 	if r.Response.Body != nil {
-		b, _ = ioutil.ReadAll(r.Response.Body)
+		b, _ = io.ReadAll(r.Response.Body)
 	}
-	r.Response.Body = ioutil.NopCloser(bytes.NewBuffer(b))
+	r.Response.Body = io.NopCloser(bytes.NewBuffer(b))
 	return b, nil
 }
 

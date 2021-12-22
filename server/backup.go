@@ -3,8 +3,8 @@ package server
 import (
 	"io"
 	"io/fs"
-	"io/ioutil"
 	"os"
+	"time"
 
 	"emperror.dev/errors"
 	"github.com/apex/log"
@@ -48,7 +48,7 @@ func (s *Server) getServerwideIgnoredFiles() (string, error) {
 		// Don't read a symlinked ignore file, or a file larger than 32KiB in size.
 		return "", nil
 	}
-	b, err := ioutil.ReadAll(f)
+	b, err := io.ReadAll(f)
 	if err != nil {
 		return "", err
 	}
@@ -62,7 +62,7 @@ func (s *Server) Backup(b backup.BackupInterface) error {
 	ignored := b.Ignored()
 	if b.Ignored() == "" {
 		if i, err := s.getServerwideIgnoredFiles(); err != nil {
-			log.WithField("server", s.Id()).WithField("error", err).Warn("failed to get server-wide ignored files")
+			log.WithField("server", s.ID()).WithField("error", err).Warn("failed to get server-wide ignored files")
 		} else {
 			ignored = i
 		}
@@ -152,12 +152,15 @@ func (s *Server) RestoreBackup(b backup.BackupInterface, reader io.ReadCloser) (
 	// Attempt to restore the backup to the server by running through each entry
 	// in the file one at a time and writing them to the disk.
 	s.Log().Debug("starting file writing process for backup restoration")
-	err = b.Restore(s.Context(), reader, func(file string, r io.Reader, mode fs.FileMode) error {
+	err = b.Restore(s.Context(), reader, func(file string, r io.Reader, mode fs.FileMode, atime, mtime time.Time) error {
 		s.Events().Publish(DaemonMessageEvent, "(restoring): "+file)
 		if err := s.Filesystem().Writefile(file, r); err != nil {
 			return err
 		}
-		return s.Filesystem().Chmod(file, mode)
+		if err := s.Filesystem().Chmod(file, mode); err != nil {
+			return err
+		}
+		return s.Filesystem().Chtimes(file, atime, mtime)
 	})
 
 	return errors.WithStackIf(err)

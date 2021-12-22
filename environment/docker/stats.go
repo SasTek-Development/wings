@@ -2,13 +2,33 @@ package docker
 
 import (
 	"context"
-	"emperror.dev/errors"
 	"encoding/json"
-	"github.com/docker/docker/api/types"
-	"github.com/pterodactyl/wings/environment"
 	"io"
 	"math"
+	"time"
+
+	"emperror.dev/errors"
+	"github.com/docker/docker/api/types"
+
+	"github.com/pterodactyl/wings/environment"
 )
+
+// Uptime returns the current uptime of the container in milliseconds. If the
+// container is not currently running this will return 0.
+func (e *Environment) Uptime(ctx context.Context) (int64, error) {
+	ins, err := e.client.ContainerInspect(ctx, e.Id)
+	if err != nil {
+		return 0, errors.Wrap(err, "environment: could not inspect container")
+	}
+	if !ins.State.Running {
+		return 0, nil
+	}
+	started, err := time.Parse(time.RFC3339, ins.State.StartedAt)
+	if err != nil {
+		return 0, errors.Wrap(err, "environment: failed to parse container start time")
+	}
+	return time.Since(started).Milliseconds(), nil
+}
 
 // Attach to the instance and then automatically emit an event whenever the resource usage for the
 // server process changes.
@@ -25,6 +45,11 @@ func (e *Environment) pollResources(ctx context.Context) error {
 		return err
 	}
 	defer stats.Body.Close()
+
+	uptime, err := e.Uptime(ctx)
+	if err != nil {
+		e.log().WithField("error", err).Warn("failed to calculate container uptime")
+	}
 
 	dec := json.NewDecoder(stats.Body)
 	for {
@@ -48,7 +73,12 @@ func (e *Environment) pollResources(ctx context.Context) error {
 				return nil
 			}
 
+			if !v.PreRead.IsZero() {
+				uptime = uptime + v.Read.Sub(v.PreRead).Milliseconds()
+			}
+
 			st := environment.Stats{
+				Uptime:      uptime,
 				Memory:      calculateDockerMemory(v.MemoryStats),
 				MemoryLimit: v.MemoryStats.Limit,
 				CpuAbsolute: calculateDockerAbsoluteCpu(v.PreCPUStats, v.CPUStats),
@@ -73,9 +103,8 @@ func (e *Environment) pollResources(ctx context.Context) error {
 // value which can be rather confusing to people trying to compare panel usage to
 // their stats output.
 //
-// This math is straight up lifted from their CLI repository in order to show the same
-// values to avoid people bothering me about it. It should also reflect a slightly more
-// correct memory value anyways.
+// This math is from their CLI repository in order to show the same values to avoid people
+// bothering me about it. It should also reflect a slightly more correct memory value anyways.
 //
 // @see https://github.com/docker/cli/blob/96e1d1d6/cli/command/container/stats_helpers.go#L227-L249
 func calculateDockerMemory(stats types.MemoryStats) uint64 {

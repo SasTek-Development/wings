@@ -10,6 +10,7 @@ import (
 	"github.com/apex/log"
 	"github.com/docker/docker/api/types"
 	"github.com/docker/docker/client"
+
 	"github.com/pterodactyl/wings/environment"
 	"github.com/pterodactyl/wings/events"
 	"github.com/pterodactyl/wings/remote"
@@ -21,7 +22,7 @@ type Metadata struct {
 	Stop  remote.ProcessStopConfiguration
 }
 
-// Ensure that the Docker environment is always implementing all of the methods
+// Ensure that the Docker environment is always implementing all the methods
 // from the base environment interface.
 var _ environment.ProcessEnvironment = (*Environment)(nil)
 
@@ -113,7 +114,6 @@ func (e *Environment) Events() *events.EventBus {
 // ID auto-assigned when the container is created.
 func (e *Environment) Exists() (bool, error) {
 	_, err := e.client.ContainerInspect(context.Background(), e.Id)
-
 	if err != nil {
 		// If this error is because the container instance wasn't found via Docker we
 		// can safely ignore the error and just return false.
@@ -127,20 +127,20 @@ func (e *Environment) Exists() (bool, error) {
 	return true, nil
 }
 
-// Determines if the server's docker container is currently running. If there is no container
-// present, an error will be raised (since this shouldn't be a case that ever happens under
-// correctly developed circumstances).
+// IsRunning determines if the server's docker container is currently running.
+// If there is no container present, an error will be raised (since this
+// shouldn't be a case that ever happens under correctly developed
+// circumstances).
 //
-// You can confirm if the instance wasn't found by using client.IsErrNotFound from the Docker
-// API.
+// You can confirm if the instance wasn't found by using client.IsErrNotFound
+// from the Docker API.
 //
 // @see docker/client/errors.go
-func (e *Environment) IsRunning() (bool, error) {
-	c, err := e.client.ContainerInspect(context.Background(), e.Id)
+func (e *Environment) IsRunning(ctx context.Context) (bool, error) {
+	c, err := e.client.ContainerInspect(ctx, e.Id)
 	if err != nil {
 		return false, err
 	}
-
 	return c.State.Running, nil
 }
 

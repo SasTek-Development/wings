@@ -3,11 +3,9 @@ package sftp
 import (
 	"context"
 	"crypto/rand"
-	"crypto/rsa"
 	"crypto/x509"
 	"encoding/pem"
 	"io"
-	"io/ioutil"
 	"net"
 	"os"
 	"path"
@@ -18,10 +16,12 @@ import (
 	"emperror.dev/errors"
 	"github.com/apex/log"
 	"github.com/pkg/sftp"
+	"golang.org/x/crypto/ed25519"
+	"golang.org/x/crypto/ssh"
+
 	"github.com/pterodactyl/wings/config"
 	"github.com/pterodactyl/wings/remote"
 	"github.com/pterodactyl/wings/server"
-	"golang.org/x/crypto/ssh"
 )
 
 // Usernames all follow the same format, so don't even bother hitting the API if the username is not
@@ -47,18 +47,20 @@ func New(m *server.Manager) *SFTPServer {
 	}
 }
 
-// Starts the SFTP server and add a persistent listener to handle inbound SFTP connections.
+// Run starts the SFTP server and add a persistent listener to handle inbound
+// SFTP connections. This will automatically generate an ED25519 key if one does
+// not already exist on the system for host key verification purposes.
 func (c *SFTPServer) Run() error {
-	if _, err := os.Stat(path.Join(c.BasePath, ".sftp/id_rsa")); os.IsNotExist(err) {
-		if err := c.generatePrivateKey(); err != nil {
+	if _, err := os.Stat(c.PrivateKeyPath()); os.IsNotExist(err) {
+		if err := c.generateED25519PrivateKey(); err != nil {
 			return err
 		}
 	} else if err != nil {
-		return errors.Wrap(err, "sftp/server: could not stat private key file")
+		return errors.Wrap(err, "sftp: could not stat private key file")
 	}
-	pb, err := ioutil.ReadFile(path.Join(c.BasePath, ".sftp/id_rsa"))
+	pb, err := os.ReadFile(c.PrivateKeyPath())
 	if err != nil {
-		return errors.Wrap(err, "sftp/server: could not read private key file")
+		return errors.Wrap(err, "sftp: could not read private key file")
 	}
 	private, err := ssh.ParsePrivateKey(pb)
 	if err != nil {
@@ -77,7 +79,9 @@ func (c *SFTPServer) Run() error {
 		return err
 	}
 
-	log.WithField("listen", c.Listen).Info("sftp server listening for connections")
+	public := string(ssh.MarshalAuthorizedKey(private.PublicKey()))
+	log.WithField("listen", c.Listen).WithField("public_key", strings.Trim(public, "\n")).Info("sftp server listening for connections")
+
 	for {
 		if conn, _ := listener.Accept(); conn != nil {
 			go func(conn net.Conn) {
@@ -132,7 +136,7 @@ func (c *SFTPServer) AcceptInbound(conn net.Conn, config *ssh.ServerConfig) {
 			if uuid == "" {
 				return false
 			}
-			return s.Id() == uuid
+			return s.ID() == uuid
 		})
 		if srv == nil {
 			continue
@@ -140,33 +144,37 @@ func (c *SFTPServer) AcceptInbound(conn net.Conn, config *ssh.ServerConfig) {
 
 		// Spin up a SFTP server instance for the authenticated user's server allowing
 		// them access to the underlying filesystem.
-		handler := sftp.NewRequestServer(channel, NewHandler(sconn, srv.Filesystem()).Handlers())
+		handler := sftp.NewRequestServer(channel, NewHandler(sconn, srv).Handlers())
 		if err := handler.Serve(); err == io.EOF {
 			handler.Close()
 		}
 	}
 }
 
-// Generates a private key that will be used by the SFTP server.
-func (c *SFTPServer) generatePrivateKey() error {
-	key, err := rsa.GenerateKey(rand.Reader, 2048)
+// Generates a new ED25519 private key that is used for host authentication when
+// a user connects to the SFTP server.
+func (c *SFTPServer) generateED25519PrivateKey() error {
+	_, priv, err := ed25519.GenerateKey(rand.Reader)
 	if err != nil {
-		return errors.WithStack(err)
+		return errors.Wrap(err, "sftp: failed to generate ED25519 private key")
 	}
-	if err := os.MkdirAll(path.Join(c.BasePath, ".sftp"), 0755); err != nil {
-		return errors.Wrap(err, "sftp/server: could not create .sftp directory")
+	if err := os.MkdirAll(path.Dir(c.PrivateKeyPath()), 0o755); err != nil {
+		return errors.Wrap(err, "sftp: could not create internal sftp data directory")
 	}
-	o, err := os.OpenFile(path.Join(c.BasePath, ".sftp/id_rsa"), os.O_RDWR|os.O_CREATE|os.O_TRUNC, 0600)
+	o, err := os.OpenFile(c.PrivateKeyPath(), os.O_RDWR|os.O_CREATE|os.O_TRUNC, 0o600)
 	if err != nil {
 		return errors.WithStack(err)
 	}
 	defer o.Close()
 
-	err = pem.Encode(o, &pem.Block{
-		Type:  "RSA PRIVATE KEY",
-		Bytes: x509.MarshalPKCS1PrivateKey(key),
-	})
-	return errors.WithStack(err)
+	b, err := x509.MarshalPKCS8PrivateKey(priv)
+	if err != nil {
+		return errors.Wrap(err, "sftp: failed to marshal private key into bytes")
+	}
+	if err := pem.Encode(o, &pem.Block{Type: "PRIVATE KEY", Bytes: b}); err != nil {
+		return errors.Wrap(err, "sftp: failed to write ED25519 private key to disk")
+	}
+	return nil
 }
 
 // A function capable of validating user credentials with the Panel API.
@@ -207,4 +215,9 @@ func (c *SFTPServer) passwordCallback(conn ssh.ConnMetadata, pass []byte) (*ssh.
 	}
 
 	return sshPerm, nil
+}
+
+// PrivateKeyPath returns the path the host private key for this server instance.
+func (c *SFTPServer) PrivateKeyPath() string {
+	return path.Join(c.BasePath, ".sftp/id_ed25519")
 }

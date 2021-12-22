@@ -1,5 +1,71 @@
 # Changelog
 
+## v1.5.3
+### Fixed
+* Fixes improper event registration and error handling during socket authentication that would cause the incorrect error message to be returned to the client, or no error in some scenarios. Event registration is now delayed until the socket is fully authenticated to ensure needless listeners are not registed.
+* Fixes dollar signs always being evaluated as environment variables with no way to escape them. They can now be escaped as `$$` which will transform into a single dollar sign.
+
+### Changed
+* A websocket connection to a server will be closed by Wings if there is a send error encountered and the client will be left to handle reconnections, rather than simply logging the error and continuing to listen for new events.
+
+## v1.5.2
+### Fixed
+* Fixes servers not properly re-syncing with the Panel if they are already running causing them to be hard-stopped when terminated, rather than stopped with the configured action.
+
+### Changed
+* Changes SFTP server implementation to use ED25519 server keys rather than deprecated SHA1 RSA keys.
+
+### Added
+* Adds server uptime output in the stats event emitted to the websocket.
+
+## v1.5.1
+### Added
+* Global configuration option for toggling server crash detection (`system.crash_detection.enabled`)
+* RPM specfile
+
+## v1.5.0
+### Fixed
+* Fixes a race condition when setting the application name in the console output for a server.
+* Fixes a server being reinstalled causing the `file_denylist` parameter for an Egg to be ignored until Wings is restarted.
+* Fixes YAML file parser not correctly setting boolean values.
+* Fixes potential issue where the underlying websocket connection is closed but the parent request context is not yet canceled causing a write over a closed connection.
+* Fixes race condition when closing all active websocket connections when a server is deleted.
+* Fixes logic to determine if a server's context is closed out and send a websocket close message to connected clients. Previously this fired off whenever the request itself was closed, and not when the server context was closed.
+
+### Added
+* Exposes `8080` in the default Docker setup to better support proxy tools.
+
+### Changed
+* Releases are now built using `Go 1.17` — the minimum version required to build Wings remains `Go 1.16`.
+* Simplifed the logic powering server updates to only pull information from the Panel rather than trying to accept updated values. All parts of Wings needing the most up-to-date server details should call `Server#Sync()` to fetch the latest stored build information.
+* `Installer#New()` no longer requires passing all of the server data as a byte slice, rather a new `Installer#ServerDetails` struct is exposed which can be passed and accepts a UUID and if the server should be started after the installer finishes.
+
+### Removed
+* Removes complicated (and unused) logic during the server installation process that was a hold-over from legacy Wings architectures.
+* Removes the `PATCH /api/servers/:server` endpoint — if you were previously using this API call it should be replaced with `POST /api/servers/:server/sync`.
+
+## v1.4.7
+### Fixed
+* SFTP access is now properly denied if a server is suspended.
+* Correctly uses `start_on_completion` and `crash_detection_enabled` for servers.
+
+## v1.4.6
+### Fixed
+* Environment variable starting with the same prefix no longer get merged into a single environment variable value (skipping all but the first).
+* The `start_on_completion` flag for server installs will now properly start the server.
+* Fixes socket files unintentionally causing backups to be aborted.
+* Files extracted from a backup now have their preior mode properly set on the restored files, rather than defaulting to 0644.
+* Fixes logrotate issues due to a bad user configuration on some systems.
+
+### Updated
+* The minimum Go version required to compile Wings is now `go1.16`.
+
+### Deprecated
+> Both of these deprecations will be removed in `Wings@2.0.0`.
+
+* The `Server.Id()` method has been deprecated in favor of `Server.ID()`.
+* The `directory` field on the `/api/servers/:server/files/pull` endpoint is deprecated and should be updated to use `root` instead for consistency with other endpoints.
+
 ## v1.4.5
 
 ### Changed

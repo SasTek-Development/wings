@@ -2,6 +2,7 @@ package server
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"net/http"
 	"os"
@@ -11,14 +12,14 @@ import (
 	"emperror.dev/errors"
 	"github.com/apex/log"
 	"github.com/creasty/defaults"
+	"golang.org/x/sync/semaphore"
+
 	"github.com/pterodactyl/wings/config"
 	"github.com/pterodactyl/wings/environment"
-	"github.com/pterodactyl/wings/environment/docker"
 	"github.com/pterodactyl/wings/events"
 	"github.com/pterodactyl/wings/remote"
 	"github.com/pterodactyl/wings/server/filesystem"
 	"github.com/pterodactyl/wings/system"
-	"golang.org/x/sync/semaphore"
 )
 
 // Server is the high level definition for a server instance being controlled
@@ -93,9 +94,17 @@ func New(client remote.Client) (*Server, error) {
 	return &s, nil
 }
 
-// Id returns the UUID for the server instance.
-func (s *Server) Id() string {
+// ID returns the UUID for the server instance.
+func (s *Server) ID() string {
 	return s.Config().GetUuid()
+}
+
+// Id returns the UUID for the server instance. This function is deprecated
+// in favor of Server.ID().
+//
+// Deprecated
+func (s *Server) Id() string {
+	return s.ID()
 }
 
 // Cancels the context assigned to this server instance. Assuming background tasks
@@ -141,7 +150,7 @@ eloop:
 }
 
 func (s *Server) Log() *log.Entry {
-	return log.WithField("server", s.Id())
+	return log.WithField("server", s.ID())
 }
 
 // Sync syncs the state of the server on the Panel with Wings. This ensures that
@@ -151,37 +160,56 @@ func (s *Server) Log() *log.Entry {
 // This also means mass actions can be performed against servers on the Panel
 // and they will automatically sync with Wings when the server is started.
 func (s *Server) Sync() error {
-	cfg, err := s.client.GetServerConfiguration(s.Context(), s.Id())
+	cfg, err := s.client.GetServerConfiguration(s.Context(), s.ID())
 	if err != nil {
 		if err := remote.AsRequestError(err); err != nil && err.StatusCode() == http.StatusNotFound {
 			return &serverDoesNotExist{}
 		}
 		return errors.WithStackIf(err)
 	}
-	return s.SyncWithConfiguration(cfg)
+
+	if err := s.SyncWithConfiguration(cfg); err != nil {
+		return errors.WithStackIf(err)
+	}
+
+	// Update the disk space limits for the server whenever the configuration for
+	// it changes.
+	s.fs.SetDiskLimit(s.DiskSpace())
+
+	s.SyncWithEnvironment()
+
+	return nil
 }
 
+// SyncWithConfiguration accepts a configuration object for a server and will
+// sync all of the values with the existing server state. This only replaces the
+// existing configuration and process configuration for the server. The
+// underlying environment will not be affected. This is because this function
+// can be called from scoped where the server may not be fully initialized,
+// therefore other things like the filesystem and environment may not exist yet.
 func (s *Server) SyncWithConfiguration(cfg remote.ServerConfigurationResponse) error {
-	// Update the data structure and persist it to the disk.
-	if err := s.UpdateDataStructure(cfg.Settings); err != nil {
-		return err
+	c := Configuration{
+		CrashDetectionEnabled: config.Get().System.CrashDetection.CrashDetectionEnabled,
 	}
+	if err := json.Unmarshal(cfg.Settings, &c); err != nil {
+		return errors.WithStackIf(err)
+	}
+
+	s.cfg.mu.Lock()
+	defer s.cfg.mu.Unlock()
+
+	// Lock the new configuration. Since we have the deferred Unlock above we need
+	// to make sure that the NEW configuration object is already locked since that
+	// defer is running on the memory address for "s.cfg.mu" which we're explicitly
+	// changing on the next line.
+	c.mu.Lock()
+
+	//goland:noinspection GoVetCopyLock
+	s.cfg = c
 
 	s.Lock()
 	s.procConfig = cfg.ProcessConfiguration
 	s.Unlock()
-
-	// Update the disk space limits for the server whenever the configuration
-	// for it changes.
-	s.fs.SetDiskLimit(s.DiskSpace())
-
-	// If this is a Docker environment we need to sync the stop configuration with it so that
-	// the process isn't just terminated when a user requests it be stopped.
-	if e, ok := s.Environment.(*docker.Environment); ok {
-		s.Log().Debug("syncing stop configuration with configured docker environment")
-		e.SetImage(s.Config().Container.Image)
-		e.SetStopConfiguration(cfg.ProcessConfiguration.Stop)
-	}
 
 	return nil
 }
@@ -233,7 +261,7 @@ func (s *Server) EnsureDataDirectoryExists() error {
 	if _, err := os.Lstat(s.fs.Path()); err != nil {
 		if os.IsNotExist(err) {
 			s.Log().Debug("server: creating root directory and setting permissions")
-			if err := os.MkdirAll(s.fs.Path(), 0700); err != nil {
+			if err := os.MkdirAll(s.fs.Path(), 0o700); err != nil {
 				return errors.WithStack(err)
 			}
 			if err := s.fs.Chown("/"); err != nil {
@@ -246,7 +274,7 @@ func (s *Server) EnsureDataDirectoryExists() error {
 	return nil
 }
 
-// Sets the state of the server internally. This function handles crash detection as
+// OnStateChange sets the state of the server internally. This function handles crash detection as
 // well as reporting to event listeners for the server.
 func (s *Server) OnStateChange() {
 	prevState := s.resources.State.Load()
@@ -261,7 +289,7 @@ func (s *Server) OnStateChange() {
 		s.Events().Publish(StatusEvent, st)
 	}
 
-	// Reset the resource usage to 0 when the process fully stops so that all of the UI
+	// Reset the resource usage to 0 when the process fully stops so that all the UI
 	// views in the Panel correctly display 0.
 	if st == environment.ProcessOfflineState {
 		s.resources.Reset()
@@ -293,7 +321,7 @@ func (s *Server) OnStateChange() {
 }
 
 // IsRunning determines if the server state is running or not. This is different
-// than the environment state, it is simply the tracked state from this daemon
+// from the environment state, it is simply the tracked state from this daemon
 // instance, and not the response from Docker.
 func (s *Server) IsRunning() bool {
 	st := s.Environment.State()

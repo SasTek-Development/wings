@@ -1,7 +1,6 @@
 package router
 
 import (
-	"bytes"
 	"context"
 	"errors"
 	"net/http"
@@ -9,6 +8,7 @@ import (
 
 	"github.com/apex/log"
 	"github.com/gin-gonic/gin"
+
 	"github.com/pterodactyl/wings/config"
 	"github.com/pterodactyl/wings/installer"
 	"github.com/pterodactyl/wings/router/middleware"
@@ -43,10 +43,13 @@ func getAllServers(c *gin.Context) {
 // for it.
 func postCreateServer(c *gin.Context) {
 	manager := middleware.ExtractManager(c)
-	buf := bytes.Buffer{}
-	buf.ReadFrom(c.Request.Body)
 
-	install, err := installer.New(c.Request.Context(), manager, buf.Bytes())
+	details := installer.ServerDetails{}
+	if err := c.BindJSON(&details); err != nil {
+		return
+	}
+
+	install, err := installer.New(c.Request.Context(), manager, details)
 	if err != nil {
 		if installer.IsValidationError(err) {
 			c.AbortWithStatusJSON(http.StatusUnprocessableEntity, gin.H{
@@ -73,24 +76,21 @@ func postCreateServer(c *gin.Context) {
 		}
 
 		if err := i.Server().Install(false); err != nil {
-			log.WithFields(log.Fields{"server": i.Uuid(), "error": err}).Error("failed to run install process for server")
+			log.WithFields(log.Fields{"server": i.Server().ID(), "error": err}).Error("failed to run install process for server")
 			return
 		}
 
-		if i.Server().Config().StartOnCompletion {
-			log.WithField("server_id", i.Server().Id()).Debug("starting server after successful installation")
+		if i.StartOnCompletion {
+			log.WithField("server_id", i.Server().ID()).Debug("starting server after successful installation")
 			if err := i.Server().HandlePowerAction(server.PowerActionStart, 30); err != nil {
 				if errors.Is(err, context.DeadlineExceeded) {
-					log.WithFields(log.Fields{"server_id": i.Server().Id(), "action": "start"}).
-						Warn("could not acquire a lock while attempting to perform a power action")
+					log.WithFields(log.Fields{"server_id": i.Server().ID(), "action": "start"}).Warn("could not acquire a lock while attempting to perform a power action")
 				} else {
-					log.WithFields(log.Fields{"server_id": i.Server().Id(), "action": "start", "error": err}).
-						Error("encountered error processing a server power action in the background")
+					log.WithFields(log.Fields{"server_id": i.Server().ID(), "action": "start", "error": err}).Error("encountered error processing a server power action in the background")
 				}
 			}
 		} else {
-			log.WithField("server_id", i.Server().Id()).
-				Debug("skipping automatic start after successful server installation")
+			log.WithField("server_id", i.Server().ID()).Debug("skipping automatic start after successful server installation")
 		}
 	}(install)
 

@@ -17,6 +17,7 @@ import (
 	"github.com/docker/docker/api/types/mount"
 	"github.com/docker/docker/client"
 	"github.com/docker/docker/daemon/logger/jsonfilelog"
+
 	"github.com/pterodactyl/wings/config"
 	"github.com/pterodactyl/wings/environment"
 	"github.com/pterodactyl/wings/system"
@@ -44,7 +45,7 @@ func (nw noopWriter) Write(b []byte) (int, error) {
 // Calling this function will poll resources for the container in the background
 // until the provided context is canceled by the caller. Failure to cancel said
 // context will cause background memory leaks as the goroutine will not exit.
-func (e *Environment) Attach() error {
+func (e *Environment) Attach(ctx context.Context) error {
 	if e.IsAttached() {
 		return nil
 	}
@@ -61,14 +62,17 @@ func (e *Environment) Attach() error {
 	}
 
 	// Set the stream again with the container.
-	if st, err := e.client.ContainerAttach(context.Background(), e.Id, opts); err != nil {
+	if st, err := e.client.ContainerAttach(ctx, e.Id, opts); err != nil {
 		return err
 	} else {
 		e.SetStream(&st)
 	}
 
 	go func() {
-		ctx, cancel := context.WithCancel(context.Background())
+		// Don't use the context provided to the function, that'll cause the polling to
+		// exit unexpectedly. We want a custom context for this, the one passed to the
+		// function is to avoid a hang situation when trying to attach to a container.
+		pollCtx, cancel := context.WithCancel(context.Background())
 		defer cancel()
 		defer e.stream.Close()
 		defer func() {
@@ -77,7 +81,7 @@ func (e *Environment) Attach() error {
 		}()
 
 		go func() {
-			if err := e.pollResources(ctx); err != nil {
+			if err := e.pollResources(pollCtx); err != nil {
 				if !errors.Is(err, context.Canceled) {
 					e.log().WithField("error", err).Error("error during environment resource polling")
 				} else {
@@ -139,7 +143,7 @@ func (e *Environment) InSituUpdate() error {
 	return nil
 }
 
-// Create creates a new container for the server using all of the data that is
+// Create creates a new container for the server using all the data that is
 // currently available for it. If the container already exists it will be
 // returned.
 func (e *Environment) Create() error {
@@ -192,7 +196,7 @@ func (e *Environment) Create() error {
 		PortBindings: a.DockerBindings(),
 
 		// Configure the mounts for this container. First mount the server data directory
-		// into the container as a r/w bind.
+		// into the container as an r/w bind.
 		Mounts: e.convertMounts(),
 
 		// Configure the /tmp folder mapping in containers. This is necessary for some
@@ -339,11 +343,9 @@ func (e *Environment) scanOutput(reader io.ReadCloser) {
 
 	events := e.Events()
 
-	err := system.ScanReader(reader, func(line string) {
+	if err := system.ScanReader(reader, func(line string) {
 		events.Publish(environment.ConsoleOutputEvent, line)
-	})
-
-	if err != nil && err != io.EOF {
+	}); err != nil && err != io.EOF {
 		log.WithField("error", err).WithField("container_id", e.Id).Warn("error processing scanner line in console output")
 		return
 	}
@@ -353,7 +355,7 @@ func (e *Environment) scanOutput(reader io.ReadCloser) {
 		return
 	}
 
-	// Close the current reader before starting a new one, the defer will still run
+	// Close the current reader before starting a new one, the defer will still run,
 	// but it will do nothing if we already closed the stream.
 	_ = reader.Close()
 
@@ -371,7 +373,7 @@ type imagePullStatus struct {
 // error to the logger but continue with the process.
 //
 // The reasoning behind this is that Quay has had some serious outages as of
-// late, and we don't need to block all of the servers from booting just because
+// late, and we don't need to block all the servers from booting just because
 // of that. I'd imagine in a lot of cases an outage shouldn't affect users too
 // badly. It'll at least keep existing servers working correctly if anything.
 func (e *Environment) ensureImageExists(image string) error {

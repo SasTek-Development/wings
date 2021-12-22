@@ -5,6 +5,7 @@ import (
 	"strconv"
 
 	"github.com/docker/go-connections/nat"
+
 	"github.com/pterodactyl/wings/config"
 )
 
@@ -19,7 +20,7 @@ type Allocations struct {
 		Port int    `json:"port"`
 	} `json:"default"`
 
-	// Mappings contains all of the ports that should be assigned to a given server
+	// Mappings contains all the ports that should be assigned to a given server
 	// attached to the IP they correspond to.
 	Mappings map[string][]int `json:"mappings"`
 }
@@ -30,7 +31,7 @@ type Allocations struct {
 //
 // You'll want to use DockerBindings() if you need to re-map 127.0.0.1 to the Docker interface.
 func (a *Allocations) Bindings() nat.PortMap {
-	var out = nat.PortMap{}
+	out := nat.PortMap{}
 
 	for ip, ports := range a.Mappings {
 		for _, port := range ports {
@@ -62,7 +63,7 @@ func (a *Allocations) DockerBindings() nat.PortMap {
 	iface := config.Get().Docker.Network.Interface
 
 	out := a.Bindings()
-	// Loop over all of the bindings for this container, and convert any that reference 127.0.0.1
+	// Loop over all the bindings for this container, and convert any that reference 127.0.0.1
 	// to use the pterodactyl0 network interface IP, as that is the true local for what people are
 	// trying to do when creating servers.
 	for p, binds := range out {
@@ -93,7 +94,7 @@ func (a *Allocations) DockerBindings() nat.PortMap {
 // To accomplish this, we'll just get the values from "DockerBindings" and then set them
 // to empty structs. Because why not.
 func (a *Allocations) Exposed() nat.PortSet {
-	var out = nat.PortSet{}
+	out := nat.PortSet{}
 
 	for port := range a.DockerBindings() {
 		out[port] = struct{}{}
