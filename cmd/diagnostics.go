@@ -2,7 +2,6 @@ package cmd
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -20,6 +19,7 @@ import (
 	"github.com/docker/docker/api/types"
 	"github.com/docker/docker/pkg/parsers/kernel"
 	"github.com/docker/docker/pkg/parsers/operatingsystem"
+	"github.com/goccy/go-json"
 	"github.com/spf13/cobra"
 
 	"github.com/pterodactyl/wings/config"
@@ -177,6 +177,17 @@ func diagnosticsCmdRun(cmd *cobra.Command, args []string) {
 		}
 	} else {
 		fmt.Fprintln(output, "Logs redacted.")
+	}
+
+	if !diagnosticsArgs.IncludeEndpoints {
+		s := output.String()
+		output.Reset()
+		s = strings.ReplaceAll(s, cfg.PanelLocation, "{redacted}")
+		s = strings.ReplaceAll(s, cfg.Api.Host, "{redacted}")
+		s = strings.ReplaceAll(s, cfg.Api.Ssl.CertificateFile, "{redacted}")
+		s = strings.ReplaceAll(s, cfg.Api.Ssl.KeyFile, "{redacted}")
+		s = strings.ReplaceAll(s, cfg.System.Sftp.Address, "{redacted}")
+		output.WriteString(s)
 	}
 
 	fmt.Println("\n---------------  generated report  ---------------")

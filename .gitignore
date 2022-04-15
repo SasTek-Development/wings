@@ -49,4 +49,4 @@ debug
 .DS_Store
 *.pprof
 *.pdf
-/sdkman_images/generated/
+pprof.*
