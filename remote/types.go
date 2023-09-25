@@ -11,6 +11,11 @@ import (
 	"github.com/pterodactyl/wings/parser"
 )
 
+const (
+	SftpAuthPassword  = SftpAuthRequestType("password")
+	SftpAuthPublicKey = SftpAuthRequestType("public_key")
+)
+
 // A generic type allowing for easy binding use when making requests to API
 // endpoints that only expect a singular argument or something that would not
 // benefit from being a typed struct.
@@ -63,14 +68,17 @@ type RawServerData struct {
 	ProcessConfiguration json.RawMessage `json:"process_configuration"`
 }
 
+type SftpAuthRequestType string
+
 // SftpAuthRequest defines the request details that are passed along to the Panel
 // when determining if the credentials provided to Wings are valid.
 type SftpAuthRequest struct {
-	User          string `json:"username"`
-	Pass          string `json:"password"`
-	IP            string `json:"ip"`
-	SessionID     []byte `json:"session_id"`
-	ClientVersion []byte `json:"client_version"`
+	Type          SftpAuthRequestType `json:"type"`
+	User          string              `json:"username"`
+	Pass          string              `json:"password"`
+	IP            string              `json:"ip"`
+	SessionID     []byte              `json:"session_id"`
+	ClientVersion []byte              `json:"client_version"`
 }
 
 // SftpAuthResponse is returned by the Panel when a pair of SFTP credentials
@@ -79,13 +87,13 @@ type SftpAuthRequest struct {
 // user for the SFTP subsystem.
 type SftpAuthResponse struct {
 	Server      string   `json:"server"`
-	Token       string   `json:"token"`
+	User        string   `json:"user"`
 	Permissions []string `json:"permissions"`
 }
 
 type OutputLineMatcher struct {
-	// The raw string to match against. This may or may not be prefixed with
-	// regex: which indicates we want to match against the regex expression.
+	// raw string to match against. This may or may not be prefixed with
+	// `regex:` which indicates we want to match against the regex expression.
 	raw []byte
 	reg *regexp.Regexp
 }
@@ -131,9 +139,9 @@ type ProcessStopConfiguration struct {
 }
 
 // ProcessConfiguration defines the process configuration for a given server
-// instance. This sets what Wings is looking for to mark a server as done starting
-// what to do when stopping, and what changes to make to the configuration file
-// for a server.
+// instance. This sets what Wings is looking for to mark a server as done
+// starting what to do when stopping, and what changes to make to the
+// configuration file for a server.
 type ProcessConfiguration struct {
 	Startup struct {
 		Done            []*OutputLineMatcher `json:"done"`
@@ -149,9 +157,20 @@ type BackupRemoteUploadResponse struct {
 	PartSize int64    `json:"part_size"`
 }
 
+type BackupPart struct {
+	ETag       string `json:"etag"`
+	PartNumber int    `json:"part_number"`
+}
+
 type BackupRequest struct {
-	Checksum     string `json:"checksum"`
-	ChecksumType string `json:"checksum_type"`
-	Size         int64  `json:"size"`
-	Successful   bool   `json:"successful"`
+	Checksum     string       `json:"checksum"`
+	ChecksumType string       `json:"checksum_type"`
+	Size         int64        `json:"size"`
+	Successful   bool         `json:"successful"`
+	Parts        []BackupPart `json:"parts"`
+}
+
+type InstallStatusRequest struct {
+	Successful bool `json:"successful"`
+	Reinstall  bool `json:"reinstall"`
 }

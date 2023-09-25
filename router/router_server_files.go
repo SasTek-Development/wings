@@ -13,13 +13,13 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/pterodactyl/wings/config"
-
 	"emperror.dev/errors"
 	"github.com/apex/log"
 	"github.com/gin-gonic/gin"
 	"golang.org/x/sync/errgroup"
 
+	"github.com/pterodactyl/wings/config"
+	"github.com/pterodactyl/wings/internal/models"
 	"github.com/pterodactyl/wings/router/downloader"
 	"github.com/pterodactyl/wings/router/middleware"
 	"github.com/pterodactyl/wings/router/tokens"
@@ -37,6 +37,15 @@ func getServerFileContents(c *gin.Context) {
 		return
 	}
 	defer f.Close()
+	// Don't allow a named pipe to be opened.
+	//
+	// @see https://github.com/pterodactyl/panel/issues/4059
+	if st.Mode()&os.ModeNamedPipe != 0 {
+		c.AbortWithStatusJSON(http.StatusBadRequest, gin.H{
+			"error": "Cannot open files of this type.",
+		})
+		return
+	}
 
 	c.Header("X-Mime-Type", st.Mimetype)
 	c.Header("Content-Length", strconv.Itoa(int(st.Size())))
@@ -70,7 +79,7 @@ func getServerListDirectory(c *gin.Context) {
 	s := ExtractServer(c)
 	dir := c.Query("directory")
 	if stats, err := s.Filesystem().ListDirectory(dir); err != nil {
-		WithError(c, err)
+		middleware.CaptureAndAbort(c, err)
 	} else {
 		c.JSON(http.StatusOK, stats)
 	}
@@ -122,6 +131,10 @@ func putServerRenameFiles(c *gin.Context) {
 					// Return nil if the error is an is not exists.
 					// NOTE: os.IsNotExist() does not work if the error is wrapped.
 					if errors.Is(err, os.ErrNotExist) {
+						s.Log().WithField("error", err).
+							WithField("from_path", pf).
+							WithField("to_path", pt).
+							Warn("failed to rename: source or target does not exist")
 						return nil
 					}
 					return err
@@ -139,7 +152,7 @@ func putServerRenameFiles(c *gin.Context) {
 			return
 		}
 
-		NewServerError(err, s).AbortFilesystemError(c)
+		middleware.CaptureAndAbort(c, err)
 		return
 	}
 
@@ -159,11 +172,11 @@ func postServerCopyFile(c *gin.Context) {
 	}
 
 	if err := s.Filesystem().IsIgnored(data.Location); err != nil {
-		NewServerError(err, s).Abort(c)
+		middleware.CaptureAndAbort(c, err)
 		return
 	}
 	if err := s.Filesystem().Copy(data.Location); err != nil {
-		NewServerError(err, s).AbortFilesystemError(c)
+		middleware.CaptureAndAbort(c, err)
 		return
 	}
 
@@ -208,7 +221,7 @@ func postServerDeleteFiles(c *gin.Context) {
 	}
 
 	if err := g.Wait(); err != nil {
-		NewServerError(err, s).Abort(c)
+		middleware.CaptureAndAbort(c, err)
 		return
 	}
 
@@ -223,7 +236,7 @@ func postServerWriteFile(c *gin.Context) {
 	f = "/" + strings.TrimLeft(f, "/")
 
 	if err := s.Filesystem().IsIgnored(f); err != nil {
-		NewServerError(err, s).Abort(c)
+		middleware.CaptureAndAbort(c, err)
 		return
 	}
 	if err := s.Filesystem().Writefile(f, c.Request.Body); err != nil {
@@ -234,7 +247,7 @@ func postServerWriteFile(c *gin.Context) {
 			return
 		}
 
-		NewServerError(err, s).AbortFilesystemError(c)
+		middleware.CaptureAndAbort(c, err)
 		return
 	}
 
@@ -281,12 +294,12 @@ func postServerPullRemoteFile(c *gin.Context) {
 			})
 			return
 		}
-		WithError(c, err)
+		middleware.CaptureAndAbort(c, err)
 		return
 	}
 
 	if err := s.Filesystem().HasSpaceErr(true); err != nil {
-		WithError(c, err)
+		middleware.CaptureAndAbort(c, err)
 		return
 	}
 	// Do not allow more than three simultaneous remote file downloads at one time.
@@ -325,13 +338,13 @@ func postServerPullRemoteFile(c *gin.Context) {
 	}
 
 	if err := download(); err != nil {
-		NewServerError(err, s).Abort(c)
+		middleware.CaptureAndAbort(c, err)
 		return
 	}
 
 	st, err := s.Filesystem().Stat(dl.Path())
 	if err != nil {
-		NewServerError(err, s).AbortFilesystemError(c)
+		middleware.CaptureAndAbort(c, err)
 		return
 	}
 	c.JSON(http.StatusOK, &st)
@@ -367,7 +380,7 @@ func postServerCreateDirectory(c *gin.Context) {
 			return
 		}
 
-		NewServerError(err, s).Abort(c)
+		middleware.CaptureAndAbort(c, err)
 		return
 	}
 
@@ -402,7 +415,7 @@ func postServerCompressFiles(c *gin.Context) {
 
 	f, err := s.Filesystem().CompressFiles(data.RootPath, data.Files)
 	if err != nil {
-		NewServerError(err, s).AbortFilesystemError(c)
+		middleware.CaptureAndAbort(c, err)
 		return
 	}
 
@@ -427,7 +440,7 @@ func postServerDecompressFiles(c *gin.Context) {
 	s := middleware.ExtractServer(c)
 	lg := middleware.ExtractLogger(c).WithFields(log.Fields{"root_path": data.RootPath, "file": data.File})
 	lg.Debug("checking if space is available for file decompression")
-	err := s.Filesystem().SpaceAvailableForDecompression(data.RootPath, data.File)
+	err := s.Filesystem().SpaceAvailableForDecompression(context.Background(), data.RootPath, data.File)
 	if err != nil {
 		if filesystem.IsErrorCode(err, filesystem.ErrCodeUnknownArchive) {
 			lg.WithField("error", err).Warn("failed to decompress file: unknown archive format")
@@ -439,7 +452,7 @@ func postServerDecompressFiles(c *gin.Context) {
 	}
 
 	lg.Info("starting file decompression")
-	if err := s.Filesystem().DecompressFile(data.RootPath, data.File); err != nil {
+	if err := s.Filesystem().DecompressFile(context.Background(), data.RootPath, data.File); err != nil {
 		// If the file is busy for some reason just return a nicer error to the user since there is not
 		// much we specifically can do. They'll need to stop the running server process in order to overwrite
 		// a file like this.
@@ -520,7 +533,7 @@ func postServerChmodFile(c *gin.Context) {
 			return
 		}
 
-		NewServerError(err, s).AbortFilesystemError(c)
+		middleware.CaptureAndAbort(c, err)
 		return
 	}
 
@@ -532,7 +545,7 @@ func postServerUploadFiles(c *gin.Context) {
 
 	token := tokens.UploadPayload{}
 	if err := tokens.ParseToken([]byte(c.Query("token")), &token); err != nil {
-		NewTrackedError(err).Abort(c)
+		middleware.CaptureAndAbort(c, err)
 		return
 	}
 
@@ -578,15 +591,20 @@ func postServerUploadFiles(c *gin.Context) {
 	for _, header := range headers {
 		p, err := s.Filesystem().SafePath(filepath.Join(directory, header.Filename))
 		if err != nil {
-			NewServerError(err, s).Abort(c)
+			middleware.CaptureAndAbort(c, err)
 			return
 		}
 
 		// We run this in a different method so I can use defer without any of
 		// the consequences caused by calling it in a loop.
 		if err := handleFileUpload(p, s, header); err != nil {
-			NewServerError(err, s).Abort(c)
+			middleware.CaptureAndAbort(c, err)
 			return
+		} else {
+			s.SaveActivity(s.NewRequestActivity(token.UserUuid, c.ClientIP()), server.ActivityFileUploaded, models.ActivityMeta{
+				"file":      header.Filename,
+				"directory": filepath.Clean(directory),
+			})
 		}
 	}
 }
@@ -604,6 +622,5 @@ func handleFileUpload(p string, s *server.Server, header *multipart.FileHeader) 
 	if err := s.Filesystem().Writefile(p, file); err != nil {
 		return err
 	}
-
 	return nil
 }

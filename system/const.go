@@ -1,6 +1,3 @@
 package system
 
-var (
-	// The current version of this software.
-	Version = "1.4.5"
-)
+var Version = "1.11.0"

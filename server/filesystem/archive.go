@@ -2,6 +2,7 @@ package filesystem
 
 import (
 	"archive/tar"
+	"context"
 	"io"
 	"io/fs"
 	"os"
@@ -17,6 +18,7 @@ import (
 	ignore "github.com/sabhiram/go-gitignore"
 
 	"github.com/pterodactyl/wings/config"
+	"github.com/pterodactyl/wings/internal/progress"
 )
 
 const memory = 4 * 1024
@@ -26,6 +28,31 @@ var pool = sync.Pool{
 		b := make([]byte, memory)
 		return b
 	},
+}
+
+// TarProgress .
+type TarProgress struct {
+	*tar.Writer
+	p *progress.Progress
+}
+
+// NewTarProgress .
+func NewTarProgress(w *tar.Writer, p *progress.Progress) *TarProgress {
+	if p != nil {
+		p.Writer = w
+	}
+	return &TarProgress{
+		Writer: w,
+		p:      p,
+	}
+}
+
+// Write .
+func (p *TarProgress) Write(v []byte) (int, error) {
+	if p.p == nil {
+		return p.Writer.Write(v)
+	}
+	return p.p.Write(v)
 }
 
 type Archive struct {
@@ -40,11 +67,14 @@ type Archive struct {
 	// Files specifies the files to archive, this takes priority over the Ignore option, if
 	// unspecified, all files in the BasePath will be archived unless Ignore is set.
 	Files []string
+
+	// Progress wraps the writer of the archive to pass through the progress tracker.
+	Progress *progress.Progress
 }
 
-// Create creates an archive at dst with all of the files defined in the
-// included files struct.
-func (a *Archive) Create(dst string) error {
+// Create creates an archive at dst with all the files defined in the
+// included Files array.
+func (a *Archive) Create(ctx context.Context, dst string) error {
 	f, err := os.OpenFile(dst, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0o600)
 	if err != nil {
 		return err
@@ -62,8 +92,26 @@ func (a *Archive) Create(dst string) error {
 		writer = f
 	}
 
+	return a.Stream(ctx, writer)
+}
+
+// Stream .
+func (a *Archive) Stream(ctx context.Context, w io.Writer) error {
+	// Choose which compression level to use based on the compression_level configuration option
+	var compressionLevel int
+	switch config.Get().System.Backups.CompressionLevel {
+	case "none":
+		compressionLevel = pgzip.NoCompression
+	case "best_compression":
+		compressionLevel = pgzip.BestCompression
+	case "best_speed":
+		fallthrough
+	default:
+		compressionLevel = pgzip.BestSpeed
+	}
+
 	// Create a new gzip writer around the file.
-	gw, _ := pgzip.NewWriterLevel(writer, pgzip.BestSpeed)
+	gw, _ := pgzip.NewWriterLevel(w, compressionLevel)
 	_ = gw.SetConcurrency(1<<20, 1)
 	defer gw.Close()
 
@@ -71,20 +119,22 @@ func (a *Archive) Create(dst string) error {
 	tw := tar.NewWriter(gw)
 	defer tw.Close()
 
+	pw := NewTarProgress(tw, a.Progress)
+
 	// Configure godirwalk.
 	options := &godirwalk.Options{
 		FollowSymbolicLinks: false,
 		Unsorted:            true,
-		Callback:            a.callback(tw),
 	}
 
 	// If we're specifically looking for only certain files, or have requested
 	// that certain files be ignored we'll update the callback function to reflect
 	// that request.
+	var callback godirwalk.WalkFunc
 	if len(a.Files) == 0 && len(a.Ignore) > 0 {
 		i := ignore.CompileIgnoreLines(strings.Split(a.Ignore, "\n")...)
 
-		options.Callback = a.callback(tw, func(_ string, rp string) error {
+		callback = a.callback(pw, func(_ string, rp string) error {
 			if i.MatchesPath(rp) {
 				return godirwalk.SkipThis
 			}
@@ -92,7 +142,19 @@ func (a *Archive) Create(dst string) error {
 			return nil
 		})
 	} else if len(a.Files) > 0 {
-		options.Callback = a.withFilesCallback(tw)
+		callback = a.withFilesCallback(pw)
+	} else {
+		callback = a.callback(pw)
+	}
+
+	// Set the callback function, wrapped with support for context cancellation.
+	options.Callback = func(path string, de *godirwalk.Dirent) error {
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		default:
+			return callback(path, de)
+		}
 	}
 
 	// Recursively walk the path we are archiving.
@@ -101,9 +163,9 @@ func (a *Archive) Create(dst string) error {
 
 // Callback function used to determine if a given file should be included in the archive
 // being generated.
-func (a *Archive) callback(tw *tar.Writer, opts ...func(path string, relative string) error) func(path string, de *godirwalk.Dirent) error {
+func (a *Archive) callback(tw *TarProgress, opts ...func(path string, relative string) error) func(path string, de *godirwalk.Dirent) error {
 	return func(path string, de *godirwalk.Dirent) error {
-		// Skip directories because we walking them recursively.
+		// Skip directories because we are walking them recursively.
 		if de.IsDir() {
 			return nil
 		}
@@ -125,12 +187,12 @@ func (a *Archive) callback(tw *tar.Writer, opts ...func(path string, relative st
 }
 
 // Pushes only files defined in the Files key to the final archive.
-func (a *Archive) withFilesCallback(tw *tar.Writer) func(path string, de *godirwalk.Dirent) error {
+func (a *Archive) withFilesCallback(tw *TarProgress) func(path string, de *godirwalk.Dirent) error {
 	return a.callback(tw, func(p string, rp string) error {
 		for _, f := range a.Files {
 			// If the given doesn't match, or doesn't have the same prefix continue
 			// to the next item in the loop.
-			if p != f && !strings.HasPrefix(p, f) {
+			if p != f && !strings.HasPrefix(strings.TrimSuffix(p, "/")+"/", f) {
 				continue
 			}
 
@@ -146,9 +208,9 @@ func (a *Archive) withFilesCallback(tw *tar.Writer) func(path string, de *godirw
 }
 
 // Adds a given file path to the final archive being created.
-func (a *Archive) addToArchive(p string, rp string, w *tar.Writer) error {
+func (a *Archive) addToArchive(p string, rp string, w *TarProgress) error {
 	// Lstat the file, this will give us the same information as Stat except that it will not
-	// follow a symlink to it's target automatically. This is important to avoid including
+	// follow a symlink to its target automatically. This is important to avoid including
 	// files that exist outside the server root unintentionally in the backup.
 	s, err := os.Lstat(p)
 	if err != nil {
@@ -173,7 +235,7 @@ func (a *Archive) addToArchive(p string, rp string, w *tar.Writer) error {
 		// it doesn't work.
 		target, err = os.Readlink(s.Name())
 		if err != nil {
-			// Ignore the not exist errors specifically, since theres nothing important about that.
+			// Ignore the not exist errors specifically, since there is nothing important about that.
 			if !os.IsNotExist(err) {
 				log.WithField("path", rp).WithField("readlink_err", err.Error()).Warn("failed reading symlink for target path; skipping...")
 			}

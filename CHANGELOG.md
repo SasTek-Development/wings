@@ -1,5 +1,99 @@
 # Changelog
 
+## v1.11.0
+### Added (since 1.7.2)
+* More detailed information returned by the `/api/system` endpoint when using the `?v=2` query parameter.
+
+### Changed (since 1.7.2)
+* Send re-installation status separately from installation status.
+* Wings release versions will now follow the major and minor version of the Panel.
+* Transfers no longer buffer to disk, instead they are fully streamed with only a small amount of memory used for buffering.
+* Release binaries are no longer compressed with UPX.
+* Use `POST` instead of `GET` for sending the status of a transfer to the Panel.
+
+### Fixed (since 1.7.2)
+* Fixed servers outgoing IP not being updated whenever a server's primary allocation is changed when using the Force Outgoing IP option.
+* Fixed servers being terminated rather than gracefully stopped when a signal is used to stop the container rather than a command.
+* Fixed file not found errors being treated as an internal error, they are now treated as a 404.
+* Wings can be run with Podman instead of Docker, this is still experimental and not recommended for production use.
+* Archive progress is now reported correctly.
+* Labels for containers can now be set by the Panel.
+* Fixed servers becoming deadlocked when the target node of a transfer goes offline.
+
+## v1.11.0-rc.2
+### Added
+* More detailed information returned by the `/api/system` endpoint when using the `?v=2` query parameter.
+
+### Changed
+* Send reinstallation status separately from installation status.
+
+### Fixed
+* Fixed servers outgoing IP not being updated whenever a server's primary allocation is changed when using the Force Outgoing IP option.
+* Fixed servers being terminated rather than gracefully stopped when a signal is used to stop the container rather than a command.
+* Fixed file not found errors being treated as an internal error, they are now treated as a 404.
+
+## v1.11.0-rc.1
+### Changed
+* Wings release versions will now follow the major and minor version of the panel.
+* Transfers no longer buffer to disk, instead they are fully streamed with only a small amount of memory used for buffering.
+* Release binaries are no longer compressed with UPX.
+
+### Fixed
+* Wings can be run with podman instead of Docker, this is still experimental and not recommended for production use.
+* Archive progress is now reported correctly.
+* Labels for containers can now be set by the Panel.
+
+## v1.7.2
+### Fixed
+* The S3 backup driver now supports Cloudflare R2
+
+### Added
+* During a server transfer, there is a new "Archiving" status that outputs the progress of creating the server transfer archive.
+* Adds a configuration option to control the list of trusted proxies that can be used to determine the client IP address.
+* Adds a configuration option to control the Docker username space setting when Wings creates containers.
+
+### Changed
+* Releases are now built using `Go 1.18` — the minimum version required to build Wings is now `Go 1.18`.
+
+## v1.7.1
+### Fixed
+* YAML parser has been updated to fix some strange issues
+
+### Added
+* Added `Force Outgoing IP` option for servers to ensure outgoing traffic uses the server's IP address
+* Adds an option to control the level of gzip compression for backups
+
+## v1.7.0
+### Fixed
+* Fixes multi-platform support for Wings' Docker image.
+
+### Added
+* Adds support for tracking of SFTP actions, power actions, server commands, and file uploads by utilizing a local SQLite database and processing events before sending them to the Panel.
+* Adds support for configuring the MTU on the `pterodactyl0` network.
+
+## v1.6.4
+### Fixed
+* Fixes a bug causing CPU limiting to not be properly applied to servers.
+* Fixes a bug causing zip archives to decompress without taking into account nested folder structures.
+
+## v1.6.3
+### Fixed
+* Fixes SFTP authentication failing for administrative users due to a permissions adjustment on the Panel.
+
+## v1.6.2
+### Fixed
+* Fixes file upload size not being properly enforced.
+* Fixes a bug that prevented listing a directory when it contained a named pipe. Also added a check to prevent attempting to read a named pipe directly.
+* Fixes a bug with the archiver logic that would include folders that had the same name prefix. (for example, requesting only `map` would also include `map2` and `map3`)
+* Requests to the Panel that return a client error (4xx response code) no longer trigger an exponential backoff, they immediately stop the request.
+
+### Changed
+* CPU limit fields are only set on the Docker container if they have been specified for the server — otherwise they are left empty.
+
+### Added
+* Added the ability to define the location of the temporary folder used by Wings — defaults to `/tmp/pterodactyl`.
+* Adds the ability to authenticate for SFTP using public keys (requires `Panel@1.8.0`).
+
 ## v1.6.1
 ### Fixed
 * Fixes error that would sometimes occur when starting a server that would cause the temporary power action lock to never be released due to a blocked channel.

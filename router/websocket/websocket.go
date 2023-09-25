@@ -8,12 +8,16 @@ import (
 	"sync"
 	"time"
 
+	"github.com/pterodactyl/wings/internal/models"
+
 	"emperror.dev/errors"
 	"github.com/apex/log"
 	"github.com/gbrlsnchs/jwt/v3"
+	"github.com/gin-gonic/gin"
 	"github.com/goccy/go-json"
 	"github.com/google/uuid"
 	"github.com/gorilla/websocket"
+
 	"github.com/pterodactyl/wings/system"
 
 	"github.com/pterodactyl/wings/config"
@@ -40,6 +44,7 @@ type Handler struct {
 	Connection   *websocket.Conn `json:"-"`
 	jwt          *tokens.WebsocketPayload
 	server       *server.Server
+	ra           server.RequestActivity
 	uuid         uuid.UUID
 }
 
@@ -77,7 +82,7 @@ func NewTokenPayload(token []byte) (*tokens.WebsocketPayload, error) {
 }
 
 // GetHandler returns a new websocket handler using the context provided.
-func GetHandler(s *server.Server, w http.ResponseWriter, r *http.Request) (*Handler, error) {
+func GetHandler(s *server.Server, w http.ResponseWriter, r *http.Request, c *gin.Context) (*Handler, error) {
 	upgrader := websocket.Upgrader{
 		// Ensure that the websocket request is originating from the Panel itself,
 		// and not some other location.
@@ -109,6 +114,7 @@ func GetHandler(s *server.Server, w http.ResponseWriter, r *http.Request) (*Hand
 		Connection: conn,
 		jwt:        nil,
 		server:     s,
+		ra:         s.NewRequestActivity("", c.ClientIP()),
 		uuid:       u,
 	}, nil
 }
@@ -264,6 +270,7 @@ func (h *Handler) GetJwt() *tokens.WebsocketPayload {
 // setJwt sets the JWT for the websocket in a race-safe manner.
 func (h *Handler) setJwt(token *tokens.WebsocketPayload) {
 	h.Lock()
+	h.ra = h.ra.SetUser(token.UserUUID)
 	h.jwt = token
 	h.Unlock()
 }
@@ -365,6 +372,10 @@ func (h *Handler) HandleInbound(ctx context.Context, m Message) error {
 				return nil
 			}
 
+			if err == nil {
+				h.server.SaveActivity(h.ra, models.Event(server.ActivityPowerPrefix+action), nil)
+			}
+
 			return err
 		}
 	case SendServerLogsEvent:
@@ -421,7 +432,13 @@ func (h *Handler) HandleInbound(ctx context.Context, m Message) error {
 				}
 			}
 
-			return h.server.Environment.SendCommand(strings.Join(m.Args, ""))
+			if err := h.server.Environment.SendCommand(strings.Join(m.Args, "")); err != nil {
+				return err
+			}
+			h.server.SaveActivity(h.ra, server.ActivityConsoleCommand, models.ActivityMeta{
+				"command": strings.Join(m.Args, ""),
+			})
+			return nil
 		}
 	}
 

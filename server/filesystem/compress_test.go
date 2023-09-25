@@ -1,6 +1,7 @@
 package filesystem
 
 import (
+	"context"
 	"os"
 	"sync/atomic"
 	"testing"
@@ -9,10 +10,12 @@ import (
 )
 
 // Given an archive named test.{ext}, with the following file structure:
+//
 //	test/
 //	|──inside/
 //	|────finside.txt
 //	|──outside.txt
+//
 // this test will ensure that it's being decompressed as expected
 func TestFilesystem_DecompressFile(t *testing.T) {
 	g := Goblin(t)
@@ -28,7 +31,7 @@ func TestFilesystem_DecompressFile(t *testing.T) {
 				g.Assert(err).IsNil()
 
 				// decompress
-				err = fs.DecompressFile("/", "test."+ext)
+				err = fs.DecompressFile(context.Background(), "/", "test."+ext)
 				g.Assert(err).IsNil()
 
 				// make sure everything is where it is supposed to be

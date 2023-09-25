@@ -1,6 +1,7 @@
 package filesystem
 
 import (
+	"bufio"
 	"bytes"
 	"errors"
 	"math/rand"
@@ -44,6 +45,14 @@ type rootFs struct {
 	root string
 }
 
+func getFileContent(file *os.File) string {
+	var w bytes.Buffer
+	if _, err := bufio.NewReader(file).WriteTo(&w); err != nil {
+		panic(err)
+	}
+	return w.String()
+}
+
 func (rfs *rootFs) CreateServerFile(p string, c []byte) error {
 	f, err := os.Create(filepath.Join(rfs.root, "/server", p))
 
@@ -75,49 +84,30 @@ func (rfs *rootFs) reset() {
 	}
 }
 
-func TestFilesystem_Readfile(t *testing.T) {
+func TestFilesystem_Openfile(t *testing.T) {
 	g := Goblin(t)
 	fs, rfs := NewFs()
 
-	g.Describe("Readfile", func() {
-		buf := &bytes.Buffer{}
+	g.Describe("File", func() {
+		g.It("returns custom error when file does not exist", func() {
+			_, _, err := fs.File("foo/bar.txt")
 
-		g.It("opens a file if it exists on the system", func() {
-			err := rfs.CreateServerFileFromString("test.txt", "testing")
-			g.Assert(err).IsNil()
-
-			err = fs.Readfile("test.txt", buf)
-			g.Assert(err).IsNil()
-			g.Assert(buf.String()).Equal("testing")
+			g.Assert(err).IsNotNil()
+			g.Assert(IsErrorCode(err, ErrNotExist)).IsTrue()
 		})
 
-		g.It("returns an error if the file does not exist", func() {
-			err := fs.Readfile("test.txt", buf)
-			g.Assert(err).IsNotNil()
-			g.Assert(errors.Is(err, os.ErrNotExist)).IsTrue()
-		})
+		g.It("returns file stat information", func() {
+			_ = rfs.CreateServerFile("foo.txt", []byte("hello world"))
 
-		g.It("returns an error if the \"file\" is a directory", func() {
-			err := os.Mkdir(filepath.Join(rfs.root, "/server/test.txt"), 0o755)
+			f, st, err := fs.File("foo.txt")
 			g.Assert(err).IsNil()
 
-			err = fs.Readfile("test.txt", buf)
-			g.Assert(err).IsNotNil()
-			g.Assert(IsErrorCode(err, ErrCodeIsDirectory)).IsTrue()
-		})
-
-		g.It("cannot open a file outside the root directory", func() {
-			err := rfs.CreateServerFileFromString("/../test.txt", "testing")
-			g.Assert(err).IsNil()
-
-			err = fs.Readfile("/../test.txt", buf)
-			g.Assert(err).IsNotNil()
-			g.Assert(IsErrorCode(err, ErrCodePathResolution)).IsTrue()
+			g.Assert(st.Name()).Equal("foo.txt")
+			g.Assert(f).IsNotNil()
+			_ = f.Close()
 		})
 
 		g.AfterEach(func() {
-			buf.Truncate(0)
-			atomic.StoreInt64(&fs.diskUsed, 0)
 			rfs.reset()
 		})
 	})
@@ -140,9 +130,10 @@ func TestFilesystem_Writefile(t *testing.T) {
 			err := fs.Writefile("test.txt", r)
 			g.Assert(err).IsNil()
 
-			err = fs.Readfile("test.txt", buf)
+			f, _, err := fs.File("test.txt")
 			g.Assert(err).IsNil()
-			g.Assert(buf.String()).Equal("test file content")
+			defer f.Close()
+			g.Assert(getFileContent(f)).Equal("test file content")
 			g.Assert(atomic.LoadInt64(&fs.diskUsed)).Equal(r.Size())
 		})
 
@@ -152,9 +143,10 @@ func TestFilesystem_Writefile(t *testing.T) {
 			err := fs.Writefile("/some/nested/test.txt", r)
 			g.Assert(err).IsNil()
 
-			err = fs.Readfile("/some/nested/test.txt", buf)
+			f, _, err := fs.File("/some/nested/test.txt")
 			g.Assert(err).IsNil()
-			g.Assert(buf.String()).Equal("test file content")
+			defer f.Close()
+			g.Assert(getFileContent(f)).Equal("test file content")
 		})
 
 		g.It("can create a new file inside a nested directory without a trailing slash", func() {
@@ -163,9 +155,10 @@ func TestFilesystem_Writefile(t *testing.T) {
 			err := fs.Writefile("some/../foo/bar/test.txt", r)
 			g.Assert(err).IsNil()
 
-			err = fs.Readfile("foo/bar/test.txt", buf)
+			f, _, err := fs.File("foo/bar/test.txt")
 			g.Assert(err).IsNil()
-			g.Assert(buf.String()).Equal("test file content")
+			defer f.Close()
+			g.Assert(getFileContent(f)).Equal("test file content")
 		})
 
 		g.It("cannot create a file outside the root directory", func() {
@@ -190,28 +183,6 @@ func TestFilesystem_Writefile(t *testing.T) {
 			g.Assert(IsErrorCode(err, ErrCodeDiskSpace)).IsTrue()
 		})
 
-		/*g.It("updates the total space used when a file is appended to", func() {
-			atomic.StoreInt64(&fs.diskUsed, 100)
-
-			b := make([]byte, 100)
-			_, _ = rand.Read(b)
-
-			r := bytes.NewReader(b)
-			err := fs.Writefile("test.txt", r)
-			g.Assert(err).IsNil()
-			g.Assert(atomic.LoadInt64(&fs.diskUsed)).Equal(int64(200))
-
-			// If we write less data than already exists, we should expect the total
-			// disk used to be decremented.
-			b = make([]byte, 50)
-			_, _ = rand.Read(b)
-
-			r = bytes.NewReader(b)
-			err = fs.Writefile("test.txt", r)
-			g.Assert(err).IsNil()
-			g.Assert(atomic.LoadInt64(&fs.diskUsed)).Equal(int64(150))
-		})*/
-
 		g.It("truncates the file when writing new contents", func() {
 			r := bytes.NewReader([]byte("original data"))
 			err := fs.Writefile("test.txt", r)
@@ -221,9 +192,10 @@ func TestFilesystem_Writefile(t *testing.T) {
 			err = fs.Writefile("test.txt", r)
 			g.Assert(err).IsNil()
 
-			err = fs.Readfile("test.txt", buf)
+			f, _, err := fs.File("test.txt")
 			g.Assert(err).IsNil()
-			g.Assert(buf.String()).Equal("new data")
+			defer f.Close()
+			g.Assert(getFileContent(f)).Equal("new data")
 		})
 
 		g.AfterEach(func() {

@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"strings"
 
 	"emperror.dev/errors"
 	"github.com/apex/log"
@@ -19,6 +18,7 @@ const (
 	ErrCodePathResolution ErrorCode = "E_BADPATH"
 	ErrCodeDenylistFile   ErrorCode = "E_DENYLIST"
 	ErrCodeUnknownError   ErrorCode = "E_UNKNOWN"
+	ErrNotExist           ErrorCode = "E_NOTEXIST"
 )
 
 type Error struct {
@@ -69,6 +69,8 @@ func (e *Error) Error() string {
 			r = "<empty>"
 		}
 		return fmt.Sprintf("filesystem: server path [%s] resolves to a location outside the server root: %s", e.path, r)
+	case ErrNotExist:
+		return "filesystem: does not exist"
 	case ErrCodeUnknownError:
 		fallthrough
 	default:
@@ -118,15 +120,6 @@ func IsErrorCode(err error, code ErrorCode) bool {
 	var fserr *Error
 	if err != nil && errors.As(err, &fserr) {
 		return fserr.code == code
-	}
-	return false
-}
-
-// IsUnknownArchiveFormatError checks if the error is due to the archive being
-// in an unexpected file format.
-func IsUnknownArchiveFormatError(err error) bool {
-	if err != nil && strings.HasPrefix(err.Error(), "format ") {
-		return true
 	}
 	return false
 }

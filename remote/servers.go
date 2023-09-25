@@ -6,6 +6,8 @@ import (
 	"strconv"
 	"sync"
 
+	"github.com/pterodactyl/wings/internal/models"
+
 	"emperror.dev/errors"
 	"github.com/apex/log"
 	"golang.org/x/sync/errgroup"
@@ -17,7 +19,7 @@ const (
 	ProcessStopNativeStop = "stop"
 )
 
-// GetServers returns all of the servers that are present on the Panel making
+// GetServers returns all the servers that are present on the Panel making
 // parallel API calls to the endpoint if more than one page of servers is
 // returned.
 func (c *client) GetServers(ctx context.Context, limit int) ([]RawServerData, error) {
@@ -56,7 +58,7 @@ func (c *client) GetServers(ctx context.Context, limit int) ([]RawServerData, er
 //
 // This handles Wings exiting during either of these processes which will leave
 // things in a bad state within the Panel. This API call is executed once Wings
-// has fully booted all of the servers.
+// has fully booted all the servers.
 func (c *client) ResetServersState(ctx context.Context) error {
 	res, err := c.Post(ctx, "/servers/reset", nil)
 	if err != nil {
@@ -90,8 +92,8 @@ func (c *client) GetInstallationScript(ctx context.Context, uuid string) (Instal
 	return config, err
 }
 
-func (c *client) SetInstallationStatus(ctx context.Context, uuid string, successful bool) error {
-	resp, err := c.Post(ctx, fmt.Sprintf("/servers/%s/install", uuid), d{"successful": successful})
+func (c *client) SetInstallationStatus(ctx context.Context, uuid string, data InstallStatusRequest) error {
+	resp, err := c.Post(ctx, fmt.Sprintf("/servers/%s/install", uuid), data)
 	if err != nil {
 		return err
 	}
@@ -113,7 +115,7 @@ func (c *client) SetTransferStatus(ctx context.Context, uuid string, successful 
 	if successful {
 		state = "success"
 	}
-	resp, err := c.Get(ctx, fmt.Sprintf("/servers/%s/transfer/%s", uuid, state), nil)
+	resp, err := c.Post(ctx, fmt.Sprintf("/servers/%s/transfer/%s", uuid, state), nil)
 	if err != nil {
 		return err
 	}
@@ -125,7 +127,7 @@ func (c *client) SetTransferStatus(ctx context.Context, uuid string, successful 
 // password combination provided is associated with a valid server on the instance
 // using the Panel's authentication control mechanisms. This will get itself
 // throttled if too many requests are made, allowing us to completely offload
-// all of the authorization security logic to the Panel.
+// all the authorization security logic to the Panel.
 func (c *client) ValidateSftpCredentials(ctx context.Context, request SftpAuthRequest) (SftpAuthResponse, error) {
 	var auth SftpAuthResponse
 	res, err := c.Post(ctx, "/sftp/auth", request)
@@ -173,6 +175,16 @@ func (c *client) SendRestorationStatus(ctx context.Context, backup string, succe
 	resp, err := c.Post(ctx, fmt.Sprintf("/backups/%s/restore", backup), d{"successful": successful})
 	if err != nil {
 		return err
+	}
+	_ = resp.Body.Close()
+	return nil
+}
+
+// SendActivityLogs sends activity logs back to the Panel for processing.
+func (c *client) SendActivityLogs(ctx context.Context, activity []models.Activity) error {
+	resp, err := c.Post(ctx, "/activity", d{"data": activity})
+	if err != nil {
+		return errors.WithStackIf(err)
 	}
 	_ = resp.Body.Close()
 	return nil
