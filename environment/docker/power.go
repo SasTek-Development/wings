@@ -103,7 +103,7 @@ func (e *Environment) Start(ctx context.Context) error {
 	// exists on the system, and rebuild the container if that is required for server booting to
 	// occur.
 	if err := e.OnBeforeStart(ctx); err != nil {
-		return errors.WithStackIf(err)
+		return errors.WrapIf(err, "environment/docker: failed to run pre-boot process")
 	}
 
 	// If we cannot start & attach to the container in 30 seconds something has gone
@@ -119,7 +119,7 @@ func (e *Environment) Start(ctx context.Context) error {
 	// By explicitly attaching to the instance before we start it, we can immediately
 	// react to errors/output stopping/etc. when starting.
 	if err := e.Attach(actx); err != nil {
-		return err
+		return errors.WrapIf(err, "environment/docker: failed to attach to container")
 	}
 
 	if err := e.client.ContainerStart(actx, e.Id, types.ContainerStartOptions{}); err != nil {
@@ -181,10 +181,10 @@ func (e *Environment) Stop(ctx context.Context) error {
 	// and using a different logic pathway to wait for the container to stop successfully.
 	//
 	// Using a negative timeout here will allow the container to stop gracefully,
-	// rather than forcefully terminating it, this value MUST be at least 1
-	// second, otherwise it will be ignored.
-	timeout := -1 * time.Second
-	if err := e.client.ContainerStop(ctx, e.Id, &timeout); err != nil {
+	// rather than forcefully terminating it.  Value is in seconds, but -1 is
+	// treated as indefinitely.
+	timeout := -1
+	if err := e.client.ContainerStop(ctx, e.Id, container.StopOptions{Timeout: &timeout}); err != nil {
 		// If the container does not exist just mark the process as stopped and return without
 		// an error.
 		if client.IsErrNotFound(err) {

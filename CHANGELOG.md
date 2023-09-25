@@ -1,5 +1,49 @@
 # Changelog
 
+## v1.11.7
+### Changed
+* Updated Go dependencies (this resolves an issue related to `http: invalid Host header` with Docker)
+* Wings is now built with go1.19.11
+
+## v1.11.6
+### Fixed
+* CVE-2023-32080
+
+## v1.11.5
+### Added
+* Added a config option to disable Wings config.yml updates from the Panel (https://github.com/pterodactyl/wings/commit/ec6d6d83ea3eb14995c24f001233e85b37ffb87b)
+
+### Changed
+* Wings is now built with Go 1.19.7
+
+### Fixed
+* Fixed archives containing partially matched file names (https://github.com/pterodactyl/wings/commit/43b3496f0001cec231c80af1f9a9b3417d04e8d4)
+
+## v1.11.4
+### Fixed
+* CVE-2023-25168
+
+## v1.11.3
+### Fixed
+* CVE-2023-25152
+
+## v1.11.2
+### Fixed
+* Backups being restored from remote storage (s3) erroring out due to a closed stream.
+* Fix IP validation logic for activity logs filtering out valid IPs instead of invalid IPs
+
+## v1.11.1
+### Changed
+* Release binaries are now built with Go 1.18.10
+* Timeout when stopping a server before a transfer begins has been reduced to 15 seconds from 1 minute
+* Removed insecure SSH protocols for use with the SFTP server
+
+### Fixed
+* Unnecessary Docker client connections being left open, causing a slow leak of file descriptors
+* Files being left open in parts of the server's filesystem, causing a leak of file descriptors
+* IPv6 addresses being corrupted by flawed port stripping logic for activity logs, old entries with malformed IPs will be deleted from the local SQLite database automatically
+* A server that times out while being stopped at the beginning of a transfer no longer causes the server to become stuck in a transferring state
+
 ## v1.11.0
 ### Added (since 1.7.2)
 * More detailed information returned by the `/api/system` endpoint when using the `?v=2` query parameter.
@@ -42,6 +86,18 @@
 * Wings can be run with podman instead of Docker, this is still experimental and not recommended for production use.
 * Archive progress is now reported correctly.
 * Labels for containers can now be set by the Panel.
+
+## v1.7.5
+### Fixed
+* CVE-2023-32080
+
+## v1.7.4
+### Fixed
+* CVE-2023-25168
+
+## v1.7.3
+### Fixed
+* CVE-2023-25152
 
 ## v1.7.2
 ### Fixed
