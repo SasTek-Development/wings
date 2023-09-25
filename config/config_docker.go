@@ -94,6 +94,8 @@ type DockerConfiguration struct {
 		Type   string            `default:"local" json:"type" yaml:"type"`
 		Config map[string]string `default:"{\"max-size\":\"5m\",\"max-file\":\"1\",\"compress\":\"false\",\"mode\":\"non-blocking\"}" json:"config" yaml:"config"`
 	} `json:"log_config" yaml:"log_config"`
+
+	Seccomp string `default:"" json:"seccomp_file" yaml:"seccomp_file"`
 }
 
 func (c DockerConfiguration) ContainerLogConfig() container.LogConfig {
@@ -105,6 +107,14 @@ func (c DockerConfiguration) ContainerLogConfig() container.LogConfig {
 		Type:   c.LogConfig.Type,
 		Config: c.LogConfig.Config,
 	}
+}
+
+func (c DockerConfiguration) GetSeccompConfig() []string {
+	if c.Seccomp == "" {
+		return []string{"no-new-privileges"}
+	}
+
+	return []string{"seccomp=" + c.Seccomp}
 }
 
 // RegistryConfiguration defines the authentication credentials for a given
