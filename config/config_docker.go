@@ -2,6 +2,8 @@ package config
 
 import (
 	"encoding/base64"
+	"fmt"
+	"os"
 	"sort"
 
 	"github.com/docker/docker/api/types"
@@ -114,7 +116,12 @@ func (c DockerConfiguration) GetSeccompConfig() []string {
 		return []string{"no-new-privileges"}
 	}
 
-	return []string{"seccomp=" + c.Seccomp}
+	bytesJSON, err := os.ReadFile(c.Seccomp)
+	if err != nil {
+		fmt.Println(err)
+	}
+
+	return []string{"seccomp=" + string(bytesJSON)}
 }
 
 // RegistryConfiguration defines the authentication credentials for a given
