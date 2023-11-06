@@ -165,7 +165,7 @@ func (e *Environment) Create() error {
 	// Merge user-provided labels with system labels
 	confLabels := e.Configuration.Labels()
 	serverMeta := e.Configuration.Meta()
-	labels := make(map[string]string, 2+len(confLabels))
+	labels := make(map[string]string, 3+len(confLabels))
 
 	for key := range confLabels {
 		labels[key] = confLabels[key]

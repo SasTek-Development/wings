@@ -86,7 +86,6 @@ func (c *Configuration) EnvironmentVariables() []string {
 	return c.environmentVariables
 }
 
-// Labels returns the container labels associated with this instance.
 func (c *Configuration) Meta() ConfigurationMeta {
 	c.mu.RLock()
 	defer c.mu.RUnlock()
