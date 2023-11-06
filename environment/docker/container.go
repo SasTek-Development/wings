@@ -164,6 +164,7 @@ func (e *Environment) Create() error {
 
 	// Merge user-provided labels with system labels
 	confLabels := e.Configuration.Labels()
+	serverMeta := e.Configuration.Meta()
 	labels := make(map[string]string, 2+len(confLabels))
 
 	for key := range confLabels {
@@ -171,6 +172,7 @@ func (e *Environment) Create() error {
 	}
 	labels["Service"] = "Pterodactyl"
 	labels["ContainerType"] = "server_process"
+	labels["ServiceName"] = serverMeta.Name
 
 	conf := &container.Config{
 		Hostname:     e.Id,

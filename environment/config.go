@@ -9,6 +9,7 @@ type Settings struct {
 	Allocations Allocations
 	Limits      Limits
 	Labels      map[string]string
+	Meta        ConfigurationMeta
 }
 
 // Defines the actual configuration struct for the environment with all of the settings
@@ -83,4 +84,12 @@ func (c *Configuration) EnvironmentVariables() []string {
 	defer c.mu.RUnlock()
 
 	return c.environmentVariables
+}
+
+// Labels returns the container labels associated with this instance.
+func (c *Configuration) Meta() ConfigurationMeta {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+
+	return c.settings.Meta
 }
