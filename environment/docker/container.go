@@ -165,7 +165,7 @@ func (e *Environment) Create() error {
 	// Merge user-provided labels with system labels
 	confLabels := e.Configuration.Labels()
 	serverMeta := e.Configuration.Meta()
-	labels := make(map[string]string, 3+len(confLabels))
+	labels := make(map[string]string, 4+len(confLabels))
 
 	for key := range confLabels {
 		labels[key] = confLabels[key]
@@ -173,6 +173,7 @@ func (e *Environment) Create() error {
 	labels["Service"] = "Pterodactyl"
 	labels["ContainerType"] = "server_process"
 	labels["ServiceName"] = serverMeta.Name
+	labels["ServiceImageType"] = getImageType(e.meta.Image)
 
 	conf := &container.Config{
 		Hostname:     e.Id,
@@ -451,4 +452,11 @@ func (e *Environment) convertMounts() []mount.Mount {
 	}
 
 	return out
+}
+
+func getImageType(image string) string {
+	if strings.Contains(image, "java") {
+		return "java"
+	}
+	return image
 }
